@@ -288,6 +288,16 @@ const GameEngine = {
     }
   },
 
+  handleDoneDrawing(io, room, playerId) {
+    const gs = room.gameState;
+    if (!gs || gs.phase !== 'drawing') return;
+
+    const currentPlayer = gs.turnOrder[gs.currentTurnIndex];
+    if (playerId !== currentPlayer) return;
+
+    GameEngine.endTurn(io, room);
+  },
+
   endTurn(io, room) {
     const gs = room.gameState;
     clearGameTimer(gs);

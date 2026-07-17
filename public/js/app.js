@@ -676,6 +676,7 @@
     // Drawing tools
     $('#btn-eraser').onclick = () => DrawCanvas.setTool('eraser');
     $('#btn-undo').onclick = () => DrawCanvas.undoLastStroke();
+    $('#btn-done').onclick = () => state.socket.emit('done-drawing');
 
     $('#pick-color').oninput = (e) => {
       DrawCanvas.setColor(e.target.value);

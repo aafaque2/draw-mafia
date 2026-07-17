@@ -300,6 +300,20 @@ function setupSocket(io) {
       }
     });
 
+    // ---- done-drawing ----
+    socket.on('done-drawing', () => {
+      try {
+        const roomInfo = RoomManager.getRoomBySocketId(socket.id);
+        if (!roomInfo) return;
+
+        const { room, playerId } = roomInfo;
+        GameEngine.handleDoneDrawing(io, room, playerId);
+      } catch (err) {
+        console.error('[done-drawing]', err);
+        socket.emit('error', { message: 'An error occurred' });
+      }
+    });
+
     // ---- chat-message ----
     socket.on('chat-message', (data) => {
       try {
