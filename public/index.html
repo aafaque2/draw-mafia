@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Draw Mafia</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- ═══════════════════ HOME SCREEN ═══════════════════ -->
+  <section id="screen-home" class="screen active">
+    <div class="particles" id="particles"></div>
+    <div class="home-container">
+      <div class="logo-wrap">
+        <h1 class="logo">DRAW<span class="accent">MAFIA</span></h1>
+        <p class="tagline">Draw. Deduce. Deceive.</p>
+      </div>
+      <div class="home-form">
+        <input type="text" id="input-name" class="input" placeholder="Enter your name" maxlength="20" autocomplete="off">
+        <button id="btn-create" class="btn btn-primary btn-lg">Create Room</button>
+        <div class="divider"><span>or join a room</span></div>
+        <div class="join-row">
+          <input type="text" id="input-code" class="input input-code" placeholder="ROOM CODE" maxlength="6" autocomplete="off">
+          <button id="btn-join" class="btn btn-secondary">Join</button>
+        </div>
+      </div>
+      <p class="footer-text">No accounts needed. Free to play.</p>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ LOBBY SCREEN ═══════════════════ -->
+  <section id="screen-lobby" class="screen">
+    <div class="lobby-layout">
+      <div class="lobby-main">
+        <div class="room-header">
+          <div class="room-code-box">
+            <span class="label">ROOM CODE</span>
+            <span id="lobby-code" class="room-code">------</span>
+            <button id="btn-copy" class="btn-icon" title="Copy code">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+            <button id="btn-reveal-code" class="btn-icon" title="Reveal / hide code">
+              <svg id="eye-open" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg id="eye-closed" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="panel glass">
+          <h3 class="panel-title">Players</h3>
+          <div id="lobby-players" class="player-list"></div>
+        </div>
+        <div class="lobby-actions">
+          <button id="btn-start" class="btn btn-primary btn-lg" disabled>Start Game (Need 3+ players)</button>
+          <button id="btn-leave" class="btn btn-ghost">Leave Room</button>
+        </div>
+      </div>
+      <div class="lobby-sidebar">
+        <div id="settings-section" class="panel glass" style="display:none">
+          <h3 class="panel-title">Settings</h3>
+          <div id="settings-controls" class="settings-grid"></div>
+        </div>
+        <div class="panel glass chat-panel">
+          <h3 class="panel-title">Chat</h3>
+          <div id="chat-lobby" class="chat-messages"></div>
+          <div class="chat-input-wrap">
+            <input type="text" id="chat-in-lobby" class="input chat-input" placeholder="Type a message..." maxlength="200">
+            <button id="btn-chat-lobby" class="btn-icon btn-send">Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ ROLE REVEAL ═══════════════════ -->
+  <section id="screen-role-reveal" class="screen">
+    <div class="reveal-container">
+      <div id="reveal-card" class="reveal-card">
+        <div id="reveal-role-icon" class="reveal-icon">?</div>
+        <h2 id="reveal-title" class="reveal-title">You are an Artist!</h2>
+        <p id="reveal-word" class="reveal-word"></p>
+        <p class="reveal-sub" id="reveal-sub">Round <span id="reveal-round">1</span> of <span id="reveal-total">3</span></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ GAME SCREEN ═══════════════════ -->
+  <section id="screen-game" class="screen">
+    <div class="game-layout">
+      <div class="game-top">
+        <div class="top-info">
+          <span id="g-round" class="badge">Round 1/3</span>
+          <span id="g-phase" class="badge badge-accent">Drawing</span>
+        </div>
+        <div class="timer-wrap">
+          <div id="g-timer" class="timer-bar"><div id="g-timer-fill" class="timer-fill"></div></div>
+          <span id="g-timer-text" class="timer-text">15s</span>
+        </div>
+        <div id="g-word-bar" class="word-bar"></div>
+      </div>
+      <div class="game-body">
+        <aside class="game-sidebar game-sidebar-left">
+          <h4 class="sidebar-title">Players</h4>
+          <div id="g-players" class="player-list player-list-compact"></div>
+        </aside>
+        <main class="game-center">
+          <canvas id="draw-canvas" width="800" height="500"></canvas>
+          <div id="turn-banner" class="turn-banner" style="display:none">
+            <span id="turn-banner-text"></span>
+          </div>
+          <div id="disc-overlay" class="disc-overlay" style="display:none">
+            <div class="disc-overlay-inner">
+              <h3>Discussion Phase</h3>
+              <p>Who seems suspicious? Use the chat to discuss.</p>
+            </div>
+          </div>
+        </main>
+        <aside class="game-sidebar game-sidebar-right">
+          <div class="chat-panel">
+            <div id="chat-game" class="chat-messages"></div>
+            <div class="chat-input-wrap">
+              <input type="text" id="chat-in-game" class="input chat-input" placeholder="Type a message..." maxlength="200">
+              <button id="btn-chat-game" class="btn-icon btn-send">Send</button>
+            </div>
+          </div>
+        </aside>
+      </div>
+      <div class="game-bottom">
+        <div id="draw-tools" class="draw-tools" style="display:none">
+          <div id="palette" class="palette"></div>
+          <input type="color" id="pick-color" value="#000000" class="pick-color">
+          <div class="size-group">
+            <button class="btn-size" data-size="3" title="Small">S</button>
+            <button class="btn-size active" data-size="8" title="Medium">M</button>
+            <button class="btn-size" data-size="15" title="Large">L</button>
+          </div>
+          <button id="btn-eraser" class="btn-tool">Eraser</button>
+          <button id="btn-undo" class="btn-tool">Undo</button>
+        </div>
+        <div id="disc-tools" class="disc-tools" style="display:none">
+          <p class="disc-bottom-text">Discussion phase — use the chat to talk</p>
+        </div>
+        <div id="vote-tools" class="vote-tools" style="display:none">
+          <div id="vote-cards-inline" class="vote-grid-inline"></div>
+          <div class="vote-actions-inline">
+            <button id="btn-confirm-vote-inline" class="btn btn-primary btn-sm" disabled>Confirm Vote</button>
+            <button id="btn-skip-vote-inline" class="btn btn-ghost btn-sm">Skip Vote</button>
+            <button id="btn-snipe" class="btn btn-danger btn-sm" style="display:none">Snipe (Guess Word)</button>
+          </div>
+          <p id="vote-count-inline" class="vote-count-inline">0 / 0 voted</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ DISCUSSION SCREEN ═══════════════════ -->
+  <section id="screen-discussion" class="screen">
+    <div class="discussion-layout">
+      <div class="disc-top">
+        <h2>Discussion Phase</h2>
+        <p class="disc-prompt">Who seems suspicious?</p>
+        <div class="timer-wrap">
+          <div id="d-timer" class="timer-bar"><div id="d-timer-fill" class="timer-fill"></div></div>
+          <span id="d-timer-text" class="timer-text">60s</span>
+        </div>
+      </div>
+      <div class="disc-body">
+        <div class="disc-canvas-wrap">
+          <canvas id="disc-canvas" width="800" height="500"></canvas>
+        </div>
+        <div class="chat-panel disc-chat">
+          <div id="chat-disc" class="chat-messages"></div>
+          <div class="chat-input-wrap">
+            <input type="text" id="chat-in-disc" class="input chat-input" placeholder="Type a message..." maxlength="200">
+            <button id="btn-chat-disc" class="btn-icon btn-send">Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ VOTING SCREEN ═══════════════════ -->
+  <section id="screen-voting" class="screen">
+    <div class="voting-container">
+      <h2>Vote for the Imposter!</h2>
+      <div class="timer-wrap">
+        <div id="v-timer" class="timer-bar"><div id="v-timer-fill" class="timer-fill"></div></div>
+        <span id="v-timer-text" class="timer-text">30s</span>
+      </div>
+      <div id="vote-cards" class="vote-grid"></div>
+      <div class="vote-actions">
+        <button id="btn-confirm-vote" class="btn btn-primary" disabled>Confirm Vote</button>
+        <button id="btn-skip-vote" class="btn btn-ghost">Skip Vote</button>
+      </div>
+      <p id="vote-count" class="vote-count">0 / 0 voted</p>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ WORD GUESS SCREEN ═══════════════════ -->
+  <section id="screen-word-guess" class="screen">
+    <div class="guess-container">
+      <h2>The Imposter Has Been Caught!</h2>
+      <p id="guess-imposter" class="guess-imposter-name"></p>
+      <div id="guess-input-wrap" class="guess-input-wrap">
+        <input type="text" id="input-guess" class="input" placeholder="Guess the word..." maxlength="50" autocomplete="off">
+        <button id="btn-guess" class="btn btn-primary">Guess</button>
+      </div>
+      <p id="guess-waiting" class="guess-waiting" style="display:none">Waiting for the imposter to guess...</p>
+      <div class="timer-wrap">
+        <div id="gu-timer" class="timer-bar"><div id="gu-timer-fill" class="timer-fill"></div></div>
+        <span id="gu-timer-text" class="timer-text">15s</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ RESULTS SCREEN ═══════════════════ -->
+  <section id="screen-results" class="screen">
+    <div class="results-container">
+      <h1 id="res-title" class="res-title">Artists Win!</h1>
+      <div class="res-details glass">
+        <p id="res-imposter">The imposter was: <strong></strong></p>
+        <p id="res-word">The word was: <strong></strong></p>
+        <p id="res-blind" style="display:none">Imposter's word was: <strong></strong></p>
+      </div>
+      <div id="res-scores" class="res-scores"></div>
+      <p id="res-next" class="res-next">Next round in <span id="res-next-count">8</span>s...</p>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ GAME OVER SCREEN ═══════════════════ -->
+  <section id="screen-gameover" class="screen">
+    <div class="gameover-container">
+      <h1 class="gameover-title">Game Over</h1>
+      <div id="final-board" class="final-board"></div>
+      <div id="leaderboard-section" class="leaderboard-section" style="display:none">
+        <div id="leaderboard-board" class="final-board"></div>
+      </div>
+      <div class="gameover-actions">
+        <button id="btn-again" class="btn btn-primary btn-lg">Play Again</button>
+        <button id="btn-lobby-back" class="btn btn-ghost">Back to Lobby</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ TOAST & MUTE ═══════════════════ -->
+  <div id="toasts" class="toast-container"></div>
+  <button id="btn-mute" class="mute-btn" title="Toggle sound">🔊</button>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/audio.js"></script>
+  <script src="/js/ui.js"></script>
+  <script src="/js/canvas.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
