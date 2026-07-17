@@ -115,7 +115,7 @@ const GameEngine = {
     const connected = getConnectedPlayers(room);
     const imposterCount = (room.settings && room.settings.imposterCount) || 1;
 
-    if (room.state !== 'lobby') return { error: 'Game already in progress' };
+    if (room.state !== 'lobby' && room.state !== 'finished') return { error: 'Game already in progress' };
     if (connected.length < imposterCount + 2) return { error: 'Not enough players' };
 
     const wordBankSession = WordBank.createSession();
@@ -563,7 +563,8 @@ const GameEngine = {
       totalRounds: gs.totalRounds,
     });
 
-    if (gs.round >= gs.totalRounds) {
+    const gameOverEarly = result.result === 'caught' || result.result === 'word-guessed' || result.result === 'imposter-disconnected';
+    if (gameOverEarly || gs.round >= gs.totalRounds) {
       gs.timer = setTimeout(() => {
         GameEngine.endGame(io, room);
       }, 8000);
