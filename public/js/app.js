@@ -627,6 +627,7 @@
       const name = $('#input-name').value.trim();
       if (!name) { UI.toast('Enter your name', 'error'); return; }
       state.myName = name;
+      localStorage.setItem('dm-name', name);
       AudioEngine.init();
       state.socket.emit('create-room', { playerName: name });
     };
@@ -637,6 +638,7 @@
       if (!name) { UI.toast('Enter your name', 'error'); return; }
       if (!code) { UI.toast('Enter room code', 'error'); return; }
       state.myName = name;
+      localStorage.setItem('dm-name', name);
       AudioEngine.init();
       state.socket.emit('join-room', { roomCode: code, playerName: name });
     };
@@ -743,6 +745,8 @@
     );
     connectSocket();
     wireUI();
+    const savedName = localStorage.getItem('dm-name');
+    if (savedName) $('#input-name').value = savedName;
     showScreen('home');
   }
 
