@@ -401,8 +401,29 @@ body {
   font-size: 13px;
   outline: none;
 }
+.setting-item select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a0a0b8' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 28px;
+}
+.setting-item input[type="range"] {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  padding: 0;
+  background: none;
+  border: none;
+}
 .setting-item select:focus { border-color: var(--primary); }
-.setting-item input[type="range"] { padding: 0; }
+.setting-item select option {
+  background: #1a1a2e;
+  color: var(--text);
+  padding: 6px;
+}
 .setting-val {
   font-size: 13px;
   font-weight: 600;
@@ -540,7 +561,7 @@ body {
   min-height: 0;
 }
 .game-sidebar {
-  width: 200px;
+  width: 260px;
   background: var(--bg2);
   border-right: 1px solid var(--border);
   display: flex;
@@ -1098,7 +1119,7 @@ body {
 @media (max-width: 900px) {
   .lobby-layout { flex-direction: column; height: auto; max-height: 95vh; overflow-y: auto; }
   .lobby-sidebar { width: 100%; }
-  .game-sidebar { width: 150px; }
+  .game-sidebar { width: 200px; }
   .disc-chat { width: 260px; }
 }
 @media (max-width: 640px) {
