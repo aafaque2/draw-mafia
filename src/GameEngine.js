@@ -579,13 +579,16 @@ const GameEngine = {
     const gs = room.gameState;
     clearGameTimer(gs);
 
-    room.state = 'finished';
+    room.state = 'lobby';
+    room.gameState = null;
+    room.currentRound = 0;
 
-    // Save scores to persistent storage
     room.players.forEach((p, id) => {
       if (gs.scores[id] !== undefined) {
         RoomManager.setPersistentScore(p.name, gs.scores[id]);
       }
+      p.score = RoomManager.getPersistentScore(p.name);
+      p.isConnected = true;
     });
 
     const finalScores = [];
@@ -602,16 +605,9 @@ const GameEngine = {
 
     io.to(room.code).emit('game-over', { finalScores, leaderboard });
 
-    setTimeout(() => {
-      room.state = 'lobby';
-      room.gameState = null;
-      room.currentRound = 0;
-      // Restore persistent scores for lobby display
-      room.players.forEach((p) => {
-        p.score = RoomManager.getPersistentScore(p.name);
-      });
+    gs.timer = setTimeout(() => {
       io.to(room.code).emit('returned-to-lobby');
-    }, 5000);
+    }, 10000);
   },
 
   handleDisconnect(io, room, playerId) {
