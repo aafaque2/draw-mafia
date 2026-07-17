@@ -1,0 +1,141 @@
+{
+  "classic": {
+    "animals": [
+      "dog", "cat", "elephant", "giraffe", "penguin", "dolphin", "butterfly",
+      "snake", "rabbit", "turtle", "owl", "shark", "monkey", "horse", "bear",
+      "frog", "octopus", "parrot", "kangaroo", "zebra", "whale", "crocodile",
+      "flamingo", "bat", "spider", "snail", "jellyfish", "peacock", "camel",
+      "hedgehog", "lobster", "panda"
+    ],
+    "food": [
+      "pizza", "hamburger", "sushi", "ice cream", "taco", "donut", "cupcake",
+      "watermelon", "hot dog", "pancake", "popcorn", "cheese", "banana",
+      "cookie", "sandwich", "fried egg", "grapes", "apple", "carrot", "pretzel",
+      "pie", "french fries", "chocolate", "spaghetti", "pineapple", "birthday cake",
+      "lollipop", "burrito", "mushroom", "corn", "strawberry", "bread"
+    ],
+    "objects": [
+      "umbrella", "guitar", "bicycle", "clock", "scissors", "key", "lamp",
+      "camera", "headphones", "sunglasses", "telescope", "candle", "envelope",
+      "diamond", "crown", "sword", "anchor", "compass", "trophy", "ladder",
+      "rocket", "helicopter", "skateboard", "balloon", "microphone", "paintbrush",
+      "hourglass", "magnifying glass", "backpack", "piano", "drum", "binoculars"
+    ],
+    "places": [
+      "beach", "castle", "volcano", "library", "hospital", "lighthouse",
+      "igloo", "pyramid", "waterfall", "cave", "island", "bridge", "prison",
+      "church", "skyscraper", "barn", "airport", "stadium", "aquarium",
+      "museum", "fountain", "windmill", "tent", "treehouse", "roller coaster",
+      "haunted house", "space station", "train station", "playground",
+      "campfire", "dock", "greenhouse"
+    ],
+    "actions": [
+      "dancing", "swimming", "cooking", "sleeping", "fishing", "painting",
+      "surfing", "skiing", "juggling", "boxing", "singing", "reading",
+      "gardening", "skydiving", "yoga", "bowling", "arm wrestling", "hiking",
+      "sneezing", "crying", "laughing", "waving", "climbing", "diving",
+      "karate", "archery", "knitting", "skateboarding", "running", "typing",
+      "jumping rope", "taking a selfie"
+    ]
+  },
+  "blind_pairs": {
+    "animals": [
+      ["cat", "lion"],
+      ["dog", "wolf"],
+      ["rabbit", "kangaroo"],
+      ["dolphin", "shark"],
+      ["butterfly", "bat"],
+      ["turtle", "snail"],
+      ["horse", "zebra"],
+      ["frog", "toad"],
+      ["monkey", "gorilla"],
+      ["parrot", "toucan"],
+      ["owl", "eagle"],
+      ["penguin", "puffin"],
+      ["crocodile", "lizard"],
+      ["mouse", "hamster"],
+      ["swan", "duck"],
+      ["camel", "llama"],
+      ["lobster", "crab"],
+      ["jellyfish", "octopus"]
+    ],
+    "food": [
+      ["pizza", "pie"],
+      ["hamburger", "sandwich"],
+      ["cupcake", "muffin"],
+      ["donut", "bagel"],
+      ["sushi", "burrito"],
+      ["taco", "crepe"],
+      ["pancake", "waffle"],
+      ["hot dog", "corn dog"],
+      ["cookie", "cracker"],
+      ["grapes", "cherries"],
+      ["lollipop", "candy cane"],
+      ["french fries", "onion rings"],
+      ["ice cream", "frozen yogurt"],
+      ["spaghetti", "ramen"],
+      ["apple", "peach"],
+      ["carrot", "chili pepper"],
+      ["pretzel", "breadstick"],
+      ["watermelon", "cantaloupe"]
+    ],
+    "objects": [
+      ["guitar", "ukulele"],
+      ["lamp", "candle"],
+      ["key", "lock"],
+      ["scissors", "pliers"],
+      ["bicycle", "motorcycle"],
+      ["crown", "hat"],
+      ["sword", "knife"],
+      ["telescope", "binoculars"],
+      ["umbrella", "mushroom"],
+      ["clock", "compass"],
+      ["rocket", "airplane"],
+      ["skateboard", "surfboard"],
+      ["microphone", "flashlight"],
+      ["envelope", "book"],
+      ["ladder", "stairs"],
+      ["piano", "accordion"],
+      ["balloon", "lightbulb"],
+      ["paintbrush", "broom"]
+    ],
+    "places": [
+      ["castle", "fortress"],
+      ["beach", "desert"],
+      ["volcano", "mountain"],
+      ["igloo", "tent"],
+      ["lighthouse", "tower"],
+      ["cave", "tunnel"],
+      ["bridge", "dam"],
+      ["church", "mosque"],
+      ["barn", "cabin"],
+      ["island", "oasis"],
+      ["library", "classroom"],
+      ["hospital", "pharmacy"],
+      ["stadium", "arena"],
+      ["waterfall", "fountain"],
+      ["skyscraper", "apartment"],
+      ["treehouse", "birdhouse"],
+      ["playground", "gym"]
+    ],
+    "actions": [
+      ["dancing", "stretching"],
+      ["swimming", "diving"],
+      ["cooking", "baking"],
+      ["sleeping", "meditating"],
+      ["singing", "yelling"],
+      ["fishing", "rowing"],
+      ["surfing", "skiing"],
+      ["boxing", "karate"],
+      ["painting", "drawing"],
+      ["juggling", "catching"],
+      ["running", "walking"],
+      ["climbing", "hiking"],
+      ["reading", "writing"],
+      ["crying", "laughing"],
+      ["waving", "clapping"],
+      ["knitting", "sewing"],
+      ["sneezing", "coughing"]
+    ]
+  }
+}
