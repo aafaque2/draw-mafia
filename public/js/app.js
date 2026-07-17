@@ -207,11 +207,15 @@
       state.myRole = null;
       state.myWord = null;
       state.currentPhase = null;
+      state.currentTurnId = null;
       state.votes = {};
+      state.selectedVote = null;
       DrawCanvas.clearCanvas();
+      clearUITimer();
       showScreen('lobby');
       updateLobbyPlayers();
       renderLobbySettings();
+      updateStartButton();
     });
 
     state.socket.on('player-disconnected', () => {
@@ -702,14 +706,14 @@
 
     // Game over buttons
     $('#btn-again').onclick = () => {
-      if (state.isHost) state.socket.emit('start-game');
-      else UI.toast('Waiting for host to start...', 'info');
+      state.socket.emit('start-game');
     };
 
     $('#btn-lobby-back').onclick = () => {
       showScreen('lobby');
       updateLobbyPlayers();
       renderLobbySettings();
+      updateStartButton();
     };
 
     // Mute
