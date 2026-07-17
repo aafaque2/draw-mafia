@@ -110,12 +110,11 @@
         case 'drawing':
           showScreen('game');
           hideAllBottomBars();
+          DrawCanvas.clearCanvas();
+          DrawCanvas.disableDrawing();
           requestAnimationFrame(() => {
             DrawCanvas.resize();
             setupGameScreen();
-            DrawCanvas.clearCanvas();
-            DrawCanvas.enableDrawing();
-            $('#draw-tools').style.display = '';
             $('#disc-overlay').style.display = 'none';
             $('#g-phase').textContent = 'Drawing';
           });
@@ -161,7 +160,8 @@
     state.socket.on('turn-ended', (data) => {
       state.currentTurnId = null;
       $('#turn-banner').style.display = 'none';
-      if (state.myId === data.playerId) DrawCanvas.disableDrawing();
+      DrawCanvas.disableDrawing();
+      $('#draw-tools').style.display = 'none';
     });
 
     state.socket.on('stroke', (data) => DrawCanvas.addRemoteStroke(data));
