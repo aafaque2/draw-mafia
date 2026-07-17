@@ -17,6 +17,7 @@ const DrawCanvas = (() => {
   let devicePixelRatio = 1;
   const LOGICAL_W = 800;
   const LOGICAL_H = 500;
+  const MIN_POINT_DIST = 2;
 
   const COLORS = [
     '#000000', '#ffffff', '#ff4060', '#ff8c00', '#ffcc00', '#00e87b',
@@ -52,8 +53,8 @@ const DrawCanvas = (() => {
     if (!c) return;
     const parent = c.parentElement;
     if (!parent) return;
-    const w = parent.clientWidth - 20;
-    const h = parent.clientHeight - 20;
+    const w = parent.clientWidth;
+    const h = parent.clientHeight;
     if (w <= 0 || h <= 0) {
       c.style.width = LOGICAL_W + 'px';
       c.style.height = LOGICAL_H + 'px';
@@ -79,10 +80,14 @@ const DrawCanvas = (() => {
   }
 
   function setupPointerEvents() {
-    canvas.addEventListener('pointerdown', onPointerDown);
-    canvas.addEventListener('pointermove', onPointerMove);
-    canvas.addEventListener('pointerup', onPointerUp);
+    canvas.addEventListener('pointerdown', onPointerDown, { passive: false });
+    canvas.addEventListener('pointermove', onPointerMove, { passive: false });
+    canvas.addEventListener('pointerup', onPointerUp, { passive: false });
     canvas.addEventListener('pointerleave', onPointerUp);
+    canvas.addEventListener('pointercancel', onPointerUp);
+
+    canvas.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+    canvas.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
   }
 
   function getCanvasCoords(e) {
@@ -92,6 +97,12 @@ const DrawCanvas = (() => {
       x: (e.clientX - rect.left) / rect.width,
       y: (e.clientY - rect.top) / rect.height,
     };
+  }
+
+  function pointDist(a, b) {
+    const dx = (b.x - a.x) * LOGICAL_W;
+    const dy = (b.y - a.y) * LOGICAL_H;
+    return Math.sqrt(dx * dx + dy * dy);
   }
 
   function onPointerDown(e) {
@@ -107,14 +118,20 @@ const DrawCanvas = (() => {
       size: currentTool === 'eraser' ? currentSize * 3 : currentSize,
       tool: currentTool,
     };
+    ctx.beginPath();
+    ctx.arc(pt.x * LOGICAL_W, pt.y * LOGICAL_H, currentStroke.size / 2, 0, Math.PI * 2);
+    ctx.fillStyle = currentStroke.color;
+    ctx.fill();
   }
 
   function onPointerMove(e) {
     if (!isDrawing || !currentStroke) return;
     e.preventDefault();
     const pt = getCanvasCoords(e);
+    const lastPt = currentStroke.points[currentStroke.points.length - 1];
+    if (lastPt && pointDist(lastPt, pt) < MIN_POINT_DIST) return;
     currentStroke.points.push(pt);
-    drawStroke(ctx, currentStroke);
+    redrawLastStroke();
   }
 
   function onPointerUp(e) {
@@ -128,8 +145,15 @@ const DrawCanvas = (() => {
     currentStroke = null;
   }
 
+  function redrawLastStroke() {
+    drawAllStrokes(ctx, allStrokes);
+    if (currentStroke && currentStroke.points.length > 1) {
+      drawStroke(ctx, currentStroke);
+    }
+  }
+
   function drawStroke(cCtx, stroke) {
-    if (!stroke || stroke.points.length < 2) return;
+    if (!stroke || stroke.points.length < 1) return;
     cCtx.save();
     cCtx.lineCap = 'round';
     cCtx.lineJoin = 'round';
@@ -137,11 +161,30 @@ const DrawCanvas = (() => {
     cCtx.lineWidth = stroke.size;
     cCtx.globalCompositeOperation = stroke.tool === 'eraser' ? 'destination-out' : 'source-over';
     cCtx.beginPath();
-    cCtx.moveTo(stroke.points[0].x * LOGICAL_W, stroke.points[0].y * LOGICAL_H);
-    for (let i = 1; i < stroke.points.length; i++) {
-      cCtx.lineTo(stroke.points[i].x * LOGICAL_W, stroke.points[i].y * LOGICAL_H);
+
+    const pts = stroke.points;
+    const toX = (i) => pts[i].x * LOGICAL_W;
+    const toY = (i) => pts[i].y * LOGICAL_H;
+
+    if (pts.length === 1) {
+      cCtx.arc(toX(0), toY(0), stroke.size / 2, 0, Math.PI * 2);
+      cCtx.fillStyle = stroke.color;
+      cCtx.fill();
+    } else if (pts.length === 2) {
+      cCtx.moveTo(toX(0), toY(0));
+      cCtx.lineTo(toX(1), toY(1));
+      cCtx.stroke();
+    } else {
+      cCtx.moveTo(toX(0), toY(0));
+      for (let i = 1; i < pts.length - 1; i++) {
+        const midX = (toX(i) + toX(i + 1)) / 2;
+        const midY = (toY(i) + toY(i + 1)) / 2;
+        cCtx.quadraticCurveTo(toX(i), toY(i), midX, midY);
+      }
+      cCtx.lineTo(toX(pts.length - 1), toY(pts.length - 1));
+      cCtx.stroke();
     }
-    cCtx.stroke();
+
     cCtx.restore();
   }
 

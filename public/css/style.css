@@ -5,6 +5,7 @@
 
 /* ── Reset & Variables ────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { overscroll-behavior: none; height: 100%; }
 
 :root {
   --bg: #0a0a12;
@@ -600,6 +601,9 @@ body {
   background: #1a1a2e;
   position: relative;
   min-width: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: hidden;
 }
 .game-center canvas {
   background: #fff;
@@ -608,6 +612,7 @@ body {
   max-width: 100%;
   max-height: 100%;
   cursor: crosshair;
+  touch-action: none;
 }
 
 .turn-banner {
@@ -632,6 +637,7 @@ body {
 /* ── Drawing Tools ────────────────────────────────────────── */
 .game-bottom {
   padding: 8px 20px;
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
   background: var(--bg2);
   border-top: 1px solid var(--border);
   flex-shrink: 0;
@@ -1121,13 +1127,124 @@ body {
   .lobby-sidebar { width: 100%; }
   .game-sidebar { width: 200px; }
   .disc-chat { width: 260px; }
+  .game-layout { height: 100dvh; }
+  .reveal-card { padding: 40px 48px; }
 }
 @media (max-width: 640px) {
-  .logo { font-size: 36px; }
+  /* Home */
+  .logo { font-size: 36px; letter-spacing: -1px; }
+  .tagline { font-size: 14px; }
+  .home-container { padding: 0 16px; }
+  .home-form { gap: 10px; }
+  .input-code { font-size: 16px; letter-spacing: 3px; width: 130px; }
+  .footer-text { margin-top: 24px; }
+
+  /* Lobby */
+  .lobby-layout { padding: 12px; gap: 12px; height: auto; max-height: 100dvh; }
+  .room-code-box { padding: 8px 14px; gap: 8px; }
+  .room-code { font-size: 20px; letter-spacing: 3px; }
+  .room-code.hidden-code { letter-spacing: 4px; }
+  .settings-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .setting-item label { font-size: 11px; }
+  .setting-item select, .setting-item input[type="range"] { font-size: 12px; padding: 5px 8px; }
+  .lobby-actions .btn-primary { font-size: 14px; padding: 12px 20px; }
+  .chat-input { padding: 8px 10px; font-size: 12px; }
+
+  /* Role Reveal */
+  .reveal-card { padding: 32px 24px; border-radius: var(--radius); }
+  .reveal-icon { font-size: 48px; margin-bottom: 12px; }
+  .reveal-title { font-size: 24px; margin-bottom: 8px; }
+  .reveal-word { font-size: 18px; }
+  .reveal-word strong { font-size: 22px; }
+
+  /* Game Screen */
   .game-sidebar { display: none; }
+  .game-layout { height: 100dvh; height: 100dvh; }
+  .game-top { padding: 6px 10px; gap: 6px; flex-wrap: wrap; }
+  .top-info { gap: 4px; }
+  .badge { font-size: 11px; padding: 3px 8px; }
+  .timer-text { font-size: 12px; min-width: 30px; }
+  .word-bar { font-size: 12px; letter-spacing: 1px; }
+  .game-body { min-height: 0; }
+  .game-center { min-height: 0; overflow: hidden; }
+  .game-bottom { padding: 6px 8px; min-height: auto; }
+  .draw-tools { gap: 6px; flex-wrap: wrap; justify-content: center; }
+  .palette { gap: 3px; }
+  .color-swatch { width: 22px; height: 22px; }
+  .btn-size { width: 26px; height: 26px; font-size: 11px; }
+  .pick-color { width: 26px; height: 26px; }
+  .btn-tool { padding: 5px 10px; font-size: 12px; }
+  .btn-sm { padding: 6px 12px; font-size: 12px; }
+  .turn-banner { padding: 6px 16px; font-size: 13px; }
+
+  /* Discussion overlay */
+  .disc-overlay-inner { padding: 16px 24px; }
+  .disc-overlay-inner h3 { font-size: 16px; }
+  .disc-overlay-inner p { font-size: 12px; }
+  .disc-bottom-text { font-size: 12px; }
+
+  /* Voting bottom bar */
+  .vote-tools { gap: 8px; }
+  .vote-card-inline { padding: 4px 10px; gap: 6px; }
+  .vote-card-inline .vci-avatar { width: 24px; height: 24px; font-size: 11px; }
+  .vote-card-inline .vci-name { font-size: 12px; }
+  .vote-actions-inline { gap: 6px; flex-wrap: wrap; justify-content: center; }
+  .vote-count-inline { font-size: 11px; }
+
+  /* Standalone Voting */
+  .voting-container { padding: 20px 12px; }
+  .voting-container h2 { font-size: 20px; }
+  .vote-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; margin: 16px 0; }
+  .vote-card { padding: 14px 8px; }
+  .vote-card .vc-avatar { width: 40px; height: 40px; font-size: 16px; }
+  .vote-card .vc-name { font-size: 13px; }
+  .vote-actions { gap: 8px; }
+  .btn { padding: 10px 16px; font-size: 13px; }
+  .btn-lg { padding: 12px 24px; font-size: 14px; }
+
+  /* Word Guess */
+  .guess-container { padding: 24px 16px; }
+  .guess-container h2 { font-size: 20px; }
+  .guess-imposter-name { font-size: 16px; margin-bottom: 16px; }
+  .guess-input-wrap { flex-direction: column; align-items: center; }
+  .guess-input-wrap .input { max-width: 100%; width: 100%; }
+
+  /* Discussion */
+  .discussion-layout { height: 100dvh; }
+  .disc-top { padding: 12px; }
+  .disc-top h2 { font-size: 18px; }
   .disc-body { flex-direction: column; }
-  .disc-chat { width: 100%; height: 200px; border-left: none; border-top: 1px solid var(--border); }
-  .vote-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+  .disc-canvas-wrap { padding: 8px; }
+  .disc-chat { width: 100%; height: 40vh; border-left: none; border-top: 1px solid var(--border); }
+
+  /* Results */
+  .results-container { padding: 24px 16px; }
+  .res-title { font-size: 28px; margin-bottom: 14px; }
+  .res-details { padding: 14px; font-size: 14px; }
+  .res-score-row { padding: 6px 12px; font-size: 13px; }
+
+  /* Game Over */
+  .gameover-container { padding: 24px 16px; }
+  .gameover-title { font-size: 28px; margin-bottom: 20px; }
+  .final-row { padding: 10px 14px; gap: 10px; }
+  .final-rank { font-size: 20px; min-width: 30px; }
+  .final-name { font-size: 14px; }
+  .final-score { font-size: 16px; }
+  .gameover-actions { flex-direction: column; gap: 8px; }
+  .gameover-actions .btn { width: 100%; }
+
+  /* Snipe */
+  .snipe-dialog { padding: 24px 16px; }
+  .snipe-dialog h3 { font-size: 18px; }
+  .snipe-input-wrap { flex-direction: column; align-items: center; }
+  .snipe-input { max-width: 100%; width: 100%; }
+
+  /* Toast */
+  .toast { max-width: 260px; font-size: 13px; padding: 10px 14px; }
+  .toast-container { top: 12px; right: 12px; }
+
+  /* Mute */
+  .mute-btn { bottom: 12px; right: 12px; width: 38px; height: 38px; font-size: 18px; }
 }
 
 /* ── Player turn glow ─────────────────────────────────────── */
