@@ -40,17 +40,19 @@
       state.roomCode = data.roomCode;
       state.myId = data.playerId;
       state.isHost = true;
-      state.codeRevealed = true;
+      state.codeRevealed = false;
       applyRoomState(data.room);
       showScreen('lobby');
+      updateLobbyCodeDisplay();
     });
 
     state.socket.on('room-joined', (data) => {
       state.roomCode = data.roomCode;
       state.myId = data.playerId;
-      state.codeRevealed = true;
+      state.codeRevealed = false;
       applyRoomState(data.room);
       showScreen('lobby');
+      updateLobbyCodeDisplay();
     });
 
     state.socket.on('player-joined', (data) => {
@@ -225,6 +227,22 @@
     updateLobbyPlayers();
     renderLobbySettings();
     updateStartButton();
+  }
+
+  function updateLobbyCodeDisplay() {
+    const codeEl = $('#lobby-code');
+    if (!codeEl) return;
+    if (state.codeRevealed) {
+      codeEl.textContent = state.roomCode || '------';
+      codeEl.classList.remove('hidden-code');
+      $('#eye-open').style.display = '';
+      $('#eye-closed').style.display = 'none';
+    } else {
+      codeEl.textContent = state.roomCode ? '•'.repeat(state.roomCode.length) : '••••••';
+      codeEl.classList.add('hidden-code');
+      $('#eye-open').style.display = 'none';
+      $('#eye-closed').style.display = '';
+    }
   }
 
   function updateLobbyPlayers() {
@@ -633,18 +651,7 @@
 
     $('#btn-reveal-code').onclick = () => {
       state.codeRevealed = !state.codeRevealed;
-      const codeEl = $('#lobby-code');
-      if (state.codeRevealed) {
-        codeEl.textContent = state.roomCode || '------';
-        codeEl.classList.remove('hidden-code');
-        $('#eye-open').style.display = '';
-        $('#eye-closed').style.display = 'none';
-      } else {
-        codeEl.textContent = '••••••';
-        codeEl.classList.add('hidden-code');
-        $('#eye-open').style.display = 'none';
-        $('#eye-closed').style.display = '';
-      }
+      updateLobbyCodeDisplay();
     };
 
     $('#btn-start').onclick = () => state.socket.emit('start-game');
