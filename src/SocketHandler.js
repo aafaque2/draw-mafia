@@ -432,16 +432,23 @@ function setupSocket(io) {
 
           GameEngine.handleDisconnect(io, room, playerId);
 
-          if (wasHost) {
+          const result = RoomManager.leaveRoom(roomCode, playerId);
+
+          if (wasHost && !result.roomDeleted) {
             let newHostId = null;
             for (const [id, p] of room.players) {
-              if (p.isConnected && id !== playerId) {
-                p.isHost = true;
+              if (p.isConnected) {
                 newHostId = id;
                 break;
               }
             }
+            if (!newHostId && room.players.size > 0) {
+              const [firstId] = room.players.keys();
+              newHostId = firstId;
+            }
             if (newHostId) {
+              const h = room.players.get(newHostId);
+              if (h) h.isHost = true;
               room.host = newHostId;
               io.to(roomCode).emit('host-changed', { newHostId });
             }
@@ -451,20 +458,12 @@ function setupSocket(io) {
             playerId,
           });
 
-          // If every player is disconnected, clean up
-          let allDisconnected = true;
-          for (const [, p] of room.players) {
-            if (p.isConnected) {
-              allDisconnected = false;
-              break;
-            }
-          }
-
-          if (allDisconnected) {
-            RoomManager.deleteRoom(roomCode);
+          if (!result.roomDeleted) {
+            io.to(roomCode).emit('room-updated', {
+              room: RoomManager.getSanitizedRoom(roomCode),
+            });
           }
         } else {
-          // Lobby state – treat as a normal leave
           const result = RoomManager.leaveRoom(roomCode, playerId);
 
           if (!result.roomDeleted) {
@@ -476,7 +475,6 @@ function setupSocket(io) {
         }
       } catch (err) {
         console.error('[disconnect]', err);
-        // Cannot emit to a disconnected socket; just log.
       }
     });
 
