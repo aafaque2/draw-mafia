@@ -23,6 +23,7 @@
     timerStart: 0,
     timerDuration: 0,
     codeRevealed: true,
+    betweenRound: false,
   };
 
   const $ = (s) => document.querySelector(s);
@@ -31,7 +32,23 @@
   function connectSocket() {
     state.socket = io({ transports: ['websocket', 'polling'] });
 
-    state.socket.on('connect', () => console.log('Connected:', state.socket.id));
+    state.socket.on('connect', () => {
+      console.log('Connected:', state.socket.id);
+      UI.toast('Connected', 'success');
+    });
+
+    state.socket.on('disconnect', () => {
+      UI.toast('Connection lost. Reconnecting...', 'error');
+    });
+
+    state.socket.on('reconnect', () => {
+      UI.toast('Reconnected!', 'success');
+      if (state.roomCode) {
+        if (state.roomState === 'playing' || state.roomState === 'lobby') {
+          state.socket.emit('join-room', { roomCode: state.roomCode, playerName: state.myName });
+        }
+      }
+    });
 
     state.socket.on('error', (data) => UI.toast(data.message || 'Error', 'error'));
 
@@ -85,7 +102,12 @@
     });
 
     state.socket.on('room-updated', (data) => {
-      if (data.room) applyRoomState(data.room);
+      if (data.room) {
+        applyRoomState(data.room);
+        if (state.roomState === 'playing') {
+          updateGamePlayerList();
+        }
+      }
     });
 
     state.socket.on('settings-updated', (data) => {
@@ -102,12 +124,16 @@
     });
 
     state.socket.on('round-started', (data) => {
+      state.betweenRound = false;
       state.currentPhase = 'role-reveal';
+      const gRound = $('#g-round');
+      if (gRound) gRound.textContent = 'Round ' + data.round + '/' + data.totalRounds;
       showRoleReveal(data);
     });
 
     state.socket.on('phase-changed', (data) => {
       state.currentPhase = data.phase;
+      removeSnipeOverlay();
       switch (data.phase) {
         case 'drawing':
           showScreen('game');
@@ -117,17 +143,27 @@
           requestAnimationFrame(() => {
             DrawCanvas.resize();
             setupGameScreen();
-            $('#disc-overlay').style.display = 'none';
-            $('#g-phase').textContent = 'Drawing';
+            const discOverlay = $('#disc-overlay');
+            if (discOverlay) discOverlay.style.display = 'none';
+            const gPhase = $('#g-phase');
+            if (gPhase) gPhase.textContent = 'Drawing';
           });
           break;
         case 'discussion':
           DrawCanvas.disableDrawing();
           hideAllBottomBars();
-          $('#disc-tools').style.display = '';
-          $('#disc-overlay').style.display = '';
-          $('#draw-tools').style.display = 'none';
-          $('#g-phase').textContent = 'Discussion';
+          if (state.settings.mode === 'blind') {
+            const wb1 = $('#g-word-bar');
+            if (wb1) wb1.style.display = 'none';
+          }
+          const discTools = $('#disc-tools');
+          if (discTools) discTools.style.display = '';
+          const discOv = $('#disc-overlay');
+          if (discOv) discOv.style.display = '';
+          const drawTools1 = $('#draw-tools');
+          if (drawTools1) drawTools1.style.display = 'none';
+          const gPhase1 = $('#g-phase');
+          if (gPhase1) gPhase1.textContent = 'Discussion';
           if (state.currentScreen !== 'game') {
             showScreen('game');
             requestAnimationFrame(() => {
@@ -140,10 +176,18 @@
         case 'voting':
           DrawCanvas.disableDrawing();
           hideAllBottomBars();
-          $('#vote-tools').style.display = '';
-          $('#disc-overlay').style.display = 'none';
-          $('#draw-tools').style.display = 'none';
-          $('#g-phase').textContent = 'Voting';
+          if (state.settings.mode === 'blind') {
+            const wb2 = $('#g-word-bar');
+            if (wb2) wb2.style.display = 'none';
+          }
+          const voteTools = $('#vote-tools');
+          if (voteTools) voteTools.style.display = '';
+          const discOv2 = $('#disc-overlay');
+          if (discOv2) discOv2.style.display = 'none';
+          const drawTools2 = $('#draw-tools');
+          if (drawTools2) drawTools2.style.display = 'none';
+          const gPhase2 = $('#g-phase');
+          if (gPhase2) gPhase2.textContent = 'Voting';
           showInlineVoting(data);
           startTimer('g', data.duration);
           break;
@@ -161,9 +205,11 @@
 
     state.socket.on('turn-ended', (data) => {
       state.currentTurnId = null;
-      $('#turn-banner').style.display = 'none';
+      const banner = $('#turn-banner');
+      if (banner) banner.style.display = 'none';
       DrawCanvas.disableDrawing();
-      $('#draw-tools').style.display = 'none';
+      const drawTools = $('#draw-tools');
+      if (drawTools) drawTools.style.display = 'none';
     });
 
     state.socket.on('stroke', (data) => DrawCanvas.addRemoteStroke(data));
@@ -174,7 +220,12 @@
       AudioEngine.playMessage();
       ['chat-lobby', 'chat-game'].forEach((id) => {
         const el = document.getElementById(id);
-        if (el) UI.renderChat(el, data);
+        if (el) {
+          UI.renderChat(el, data);
+          while (el.children.length > 200) {
+            el.removeChild(el.firstChild);
+          }
+        }
       });
     });
 
@@ -202,7 +253,26 @@
 
     state.socket.on('game-over', (data) => showGameOver(data));
 
-    state.socket.on('returned-to-lobby', () => {
+    state.socket.on('between-rounds', (data) => {
+      state.betweenRound = true;
+      state.myRole = null;
+      state.myWord = null;
+      state.currentPhase = null;
+      state.currentTurnId = null;
+      state.votes = {};
+      state.selectedVote = null;
+      DrawCanvas.clearCanvas();
+      clearUITimer();
+      removeSnipeOverlay();
+      if (data && data.room) applyRoomState(data.room);
+      UI.toast('Round ' + data.round + ' of ' + data.totalRounds + ' complete', 'info');
+      showScreen('lobby');
+      updateLobbyPlayers();
+      renderLobbySettings();
+      updateStartButton();
+    });
+
+    state.socket.on('returned-to-lobby', (data) => {
       state.roomState = 'lobby';
       state.myRole = null;
       state.myWord = null;
@@ -212,10 +282,21 @@
       state.selectedVote = null;
       DrawCanvas.clearCanvas();
       clearUITimer();
+      if (data && data.room) applyRoomState(data.room);
       showScreen('lobby');
       updateLobbyPlayers();
       renderLobbySettings();
       updateStartButton();
+    });
+
+    state.socket.on('removed-from-room', (data) => {
+      UI.toast(data.reason || 'You were removed from the room', 'error');
+      resetState();
+      showScreen('home');
+    });
+
+    state.socket.on('play-again-updated', (data) => {
+      updatePlayAgainStatus(data.playAgainPlayers || []);
     });
 
     state.socket.on('player-disconnected', () => {
@@ -263,19 +344,27 @@
   function updateStartButton() {
     const btn = $('#btn-start');
     if (!btn) return;
-    const canStart = state.isHost && state.players.length >= 3;
+    const imposterCount = (state.settings && state.settings.imposterCount) || 1;
+    const minPlayers = imposterCount + 2;
+    const canStart = state.isHost && state.players.length >= minPlayers;
     btn.disabled = !canStart;
-    if (canStart) btn.textContent = 'Start Game';
-    else if (state.isHost) btn.textContent = `Start Game (${state.players.length}/3 min)`;
-    else btn.textContent = 'Waiting for host...';
+    if (state.betweenRound) {
+      if (canStart) btn.textContent = 'Start Next Round';
+      else if (state.isHost) btn.textContent = `Start Next Round (${state.players.length}/${minPlayers} min)`;
+      else btn.textContent = 'Waiting for host...';
+    } else {
+      if (canStart) btn.textContent = 'Start Game';
+      else if (state.isHost) btn.textContent = `Start Game (${state.players.length}/${minPlayers} min)`;
+      else btn.textContent = 'Waiting for host...';
+    }
   }
 
   function renderLobbySettings() {
     const section = $('#settings-section');
     const container = $('#settings-controls');
     if (!section || !container) return;
-    section.style.display = state.isHost ? '' : 'none';
-    UI.renderSettings(container, state.settings, state.isHost, (changes) => {
+    section.style.display = (state.isHost && !state.betweenRound) ? '' : 'none';
+    UI.renderSettings(container, state.settings, state.isHost && !state.betweenRound, (changes) => {
       state.socket.emit('update-settings', { settings: changes });
     });
   }
@@ -318,6 +407,7 @@
   function setupGameScreen() {
     updateGamePlayerList();
     const wordBar = $('#g-word-bar');
+    if (wordBar) wordBar.style.display = '';
     if (state.myRole === 'imposter' && state.settings.mode === 'classic') {
       wordBar.textContent = '???';
     } else {
@@ -357,9 +447,12 @@
 
   // ── Voting (inline in game screen) ───────────────────────
   function hideAllBottomBars() {
-    $('#draw-tools').style.display = 'none';
-    $('#disc-tools').style.display = 'none';
-    $('#vote-tools').style.display = 'none';
+    const drawTools = $('#draw-tools');
+    if (drawTools) drawTools.style.display = 'none';
+    const discTools = $('#disc-tools');
+    if (discTools) discTools.style.display = 'none';
+    const voteTools = $('#vote-tools');
+    if (voteTools) voteTools.style.display = 'none';
   }
 
   function showInlineVoting(data) {
@@ -377,6 +470,7 @@
     renderInlineVoteCards(container, votePlayers, null, onVoteSelect);
 
     $('#btn-confirm-vote-inline').disabled = true;
+    $('#btn-skip-vote-inline').disabled = false;
     $('#btn-confirm-vote-inline').onclick = () => {
       if (state.selectedVote) {
         state.socket.emit('cast-vote', { targetId: state.selectedVote });
@@ -441,17 +535,27 @@
   }
 
   // ── Snipe (Word Guess during voting) ────────────────────
-  function showSnipeDialog() {
+  function removeSnipeOverlay() {
+    document.querySelectorAll('.snipe-overlay').forEach((el) => el.remove());
+  }
+
+  function showSnipeDialog(opts) {
+    opts = opts || {};
+    removeSnipeOverlay();
+    const title = opts.title || 'Snipe the Word!';
+    const subtitle = opts.subtitle || 'Guess the word to win. You have one attempt.';
+    const btnText = opts.btnText || 'Snipe!';
+    const emitEvent = opts.emitEvent || 'snipe';
     const overlay = UI.el('div', 'snipe-overlay');
     const inner = UI.el('div', 'snipe-dialog glass');
-    inner.innerHTML = '<h3>Snipe the Word!</h3><p>Guess the word to win. You have one attempt.</p>';
+    inner.innerHTML = '<img src="/logo/draw-mafia-logo-nobg.png" alt="Draw Mafia" class="screen-icon-logo"><h3>' + title + '</h3><p>' + subtitle + '</p>';
     const inputWrap = UI.el('div', 'snipe-input-wrap');
     const input = UI.el('input', 'input snipe-input');
     input.type = 'text';
     input.placeholder = 'Type your guess...';
     input.maxLength = 50;
     input.autocomplete = 'off';
-    const submitBtn = UI.el('button', 'btn btn-danger', 'Snipe!');
+    const submitBtn = UI.el('button', 'btn btn-danger', btnText);
     inputWrap.appendChild(input);
     inputWrap.appendChild(submitBtn);
     inner.appendChild(inputWrap);
@@ -465,9 +569,10 @@
     function submit() {
       const guess = input.value.trim();
       if (guess) {
-        state.socket.emit('snipe', { guess });
+        state.socket.emit(emitEvent, { guess });
         overlay.remove();
-        UI.toast('Snipe submitted!', 'info');
+        submitBtn.disabled = true;
+        UI.toast(opts.successToast || 'Submitted!', 'info');
       }
     }
 
@@ -482,7 +587,13 @@
     const isImposter = state.myId === data.imposterId;
 
     if (isImposter) {
-      showSnipeDialog();
+      showSnipeDialog({
+        title: 'Guess the Word!',
+        subtitle: 'You\'ve been caught! Guess the word to stay in the game. You have one attempt.',
+        btnText: 'Guess',
+        emitEvent: 'guess-word',
+        successToast: 'Word guessed!',
+      });
     } else {
       UI.toast('The imposter has been caught! They get to guess the word...', 'info');
     }
@@ -498,25 +609,50 @@
     showScreen('results');
 
     const title = $('#res-title');
+    const survived = data.result === 'survived';
     const artistsWin = data.result === 'caught' || data.result === 'imposter-disconnected';
-    title.textContent = artistsWin ? 'Artists Win!' : 'Imposter Wins!';
-    title.className = 'res-title ' + (artistsWin ? 'win' : 'lose');
+    const wrongVote = data.result === 'wrong-vote';
+    if (survived) {
+      title.textContent = 'No One Ejected';
+      title.className = 'res-title neutral';
+    } else if (wrongVote) {
+      title.textContent = 'Wrong Person Voted Out!';
+      title.className = 'res-title lose';
+    } else {
+      title.textContent = artistsWin ? 'Artists Win!' : 'Imposter Wins!';
+      title.className = 'res-title ' + (artistsWin ? 'win' : 'lose');
+    }
 
-    if (artistsWin) AudioEngine.playWinFanfare();
+    if (survived) AudioEngine.playDing();
+    else if (wrongVote) AudioEngine.playLoseBuzzer();
+    else if (artistsWin) AudioEngine.playWinFanfare();
     else AudioEngine.playLoseBuzzer();
 
     const imposterNames = (data.imposters || []).map((id) => {
       const p = state.players.find((pl) => pl.id === id);
       return p ? p.name : id;
     });
-    $('#res-imposter').querySelector('strong').textContent = imposterNames.join(', ');
-    $('#res-word').querySelector('strong').textContent = data.word || '???';
+    const resImposter = $('#res-imposter');
+    if (resImposter) {
+      const strong = resImposter.querySelector('strong');
+      if (strong) strong.textContent = imposterNames.join(', ');
+    }
+    const resWord = $('#res-word');
+    if (resWord) {
+      const strong = resWord.querySelector('strong');
+      if (strong) strong.textContent = data.word || '???';
+    }
 
     if (data.imposterWord && state.settings.mode === 'blind') {
-      $('#res-blind').style.display = '';
-      $('#res-blind').querySelector('strong').textContent = data.imposterWord;
+      const resBlind = $('#res-blind');
+      if (resBlind) {
+        resBlind.style.display = '';
+        const strong = resBlind.querySelector('strong');
+        if (strong) strong.textContent = data.imposterWord;
+      }
     } else {
-      $('#res-blind').style.display = 'none';
+      const resBlind = $('#res-blind');
+      if (resBlind) resBlind.style.display = 'none';
     }
 
     if (data.scores) {
@@ -540,17 +676,25 @@
       });
     }
 
-    let remaining = 8;
-    const countEl = $('#res-next-count');
+    let remaining = 5;
     const isLastRound = data.round >= data.totalRounds;
-    $('#res-next').textContent = isLastRound
-      ? 'Showing final results in ' + remaining + 's...'
-      : 'Next round in ' + remaining + 's...';
+    const countEl = $('#res-next-count');
+    const resNextEl = $('#res-next');
+    if (resNextEl) {
+      const prefix = isLastRound ? 'Showing final results in ' : 'Returning to lobby in ';
+      if (countEl) {
+        countEl.textContent = remaining;
+        resNextEl.innerHTML = prefix + '<span id="res-next-count">' + remaining + '</span>s...';
+      } else {
+        resNextEl.textContent = prefix + remaining + 's...';
+      }
+    }
 
     clearUITimer();
     state.uiTimerHandle = setInterval(() => {
       remaining--;
-      if (countEl) countEl.textContent = remaining;
+      const el = $('#res-next-count');
+      if (el) el.textContent = remaining;
       if (remaining <= 0) clearUITimer();
     }, 1000);
   }
@@ -569,7 +713,27 @@
       lbSection.style.display = 'none';
     }
 
+    const btnAgain = $('#btn-again');
+    btnAgain.textContent = 'Play Again';
+    btnAgain.disabled = false;
+    btnAgain.onclick = () => {
+      state.socket.emit('play-again');
+      btnAgain.disabled = true;
+      btnAgain.textContent = 'Waiting for others...';
+    };
+
+    const playAgainStatus = $('#play-again-status');
+    if (playAgainStatus) playAgainStatus.textContent = '';
+
     AudioEngine.playWinFanfare();
+  }
+
+  function updatePlayAgainStatus(playAgainPlayers) {
+    const statusEl = $('#play-again-status');
+    if (!statusEl) return;
+    const clicked = playAgainPlayers.length;
+    const iClicked = playAgainPlayers.includes(state.myId);
+    statusEl.textContent = clicked + ' / ' + state.players.length + ' ready' + (iClicked ? ' (you)' : '');
   }
 
   // ── Timer ─────────────────────────────────────────────────
@@ -617,6 +781,7 @@
     state.votes = {};
     state.selectedVote = null;
     state.roomState = 'lobby';
+    state.betweenRound = false;
     clearUITimer();
   }
 
@@ -660,7 +825,16 @@
       updateLobbyCodeDisplay();
     };
 
-    $('#btn-start').onclick = () => state.socket.emit('start-game');
+    $('#btn-start').onclick = () => {
+      const btn = $('#btn-start');
+      if (btn) btn.disabled = true;
+      if (state.betweenRound) {
+        state.betweenRound = false;
+        state.socket.emit('start-next-round');
+      } else {
+        state.socket.emit('start-game');
+      }
+    };
 
     $('#btn-leave').onclick = () => {
       state.socket.emit('leave-room');
@@ -705,18 +879,6 @@
     });
 
     DrawCanvas.onStroke((stroke) => state.socket.emit('draw', stroke));
-
-    // Game over buttons
-    $('#btn-again').onclick = () => {
-      state.socket.emit('start-game');
-    };
-
-    $('#btn-lobby-back').onclick = () => {
-      showScreen('lobby');
-      updateLobbyPlayers();
-      renderLobbySettings();
-      updateStartButton();
-    };
 
     // Mute
     $('#btn-mute').onclick = () => {

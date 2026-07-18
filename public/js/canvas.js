@@ -29,7 +29,7 @@ const DrawCanvas = (() => {
     canvas = canvasEl;
     ctx = canvas.getContext('2d');
     discCanvas = discCanvasEl;
-    discCtx = discCanvas.getContext('2d');
+    discCtx = discCanvas ? discCanvas.getContext('2d') : null;
     devicePixelRatio = window.devicePixelRatio || 1;
     resize();
     window.addEventListener('resize', resize);
@@ -40,11 +40,12 @@ const DrawCanvas = (() => {
 
   function resize() {
     fitCanvas(canvas, ctx);
-    fitCanvas(discCanvas, discCtx);
+    if (discCanvas && discCtx) fitCanvas(discCanvas, discCtx);
     redraw();
   }
 
   function resizeDiscCanvas() {
+    if (!discCanvas || !discCtx) return;
     fitCanvas(discCanvas, discCtx);
     drawAllStrokes(discCtx, allStrokes);
   }
@@ -196,7 +197,7 @@ const DrawCanvas = (() => {
 
   function redraw() {
     drawAllStrokes(ctx, allStrokes);
-    drawAllStrokes(discCtx, allStrokes);
+    if (discCtx) drawAllStrokes(discCtx, allStrokes);
   }
 
   function buildPalette() {
@@ -260,12 +261,24 @@ const DrawCanvas = (() => {
   }
 
   function addRemoteStroke(stroke) {
+    if (!stroke || typeof stroke !== 'object') return;
+    if (!Array.isArray(stroke.points) || stroke.points.length === 0) return;
+    if (typeof stroke.color !== 'string' || typeof stroke.size !== 'number') return;
+    for (const pt of stroke.points) {
+      if (!pt || typeof pt.x !== 'number' || typeof pt.y !== 'number') return;
+    }
     allStrokes.push(stroke);
     drawStroke(ctx, stroke);
   }
 
   function revealTurnStrokes(strokes) {
-    strokes.forEach((s) => allStrokes.push(s));
+    const existingIds = new Set(allStrokes.map((s) => s.id));
+    strokes.forEach((s) => {
+      if (s && s.id && !existingIds.has(s.id)) {
+        allStrokes.push(s);
+        existingIds.add(s.id);
+      }
+    });
     drawAllStrokes(ctx, allStrokes);
   }
 
@@ -281,11 +294,11 @@ const DrawCanvas = (() => {
     myStrokes = [];
     allStrokes = [];
     drawAllStrokes(ctx, allStrokes);
-    drawAllStrokes(discCtx, allStrokes);
+    if (discCtx) drawAllStrokes(discCtx, allStrokes);
   }
 
   function copyToDiscussion() {
-    drawAllStrokes(discCtx, allStrokes);
+    if (discCtx) drawAllStrokes(discCtx, allStrokes);
   }
 
   function onStroke(cb) { onStrokeCallback = cb; }

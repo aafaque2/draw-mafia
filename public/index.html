@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Draw Mafia</title>
+  <link rel="icon" type="image/png" href="/logo/draw-mafia-logo-nobg.png">
   <link rel="stylesheet" href="/css/style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -15,8 +16,7 @@
     <div class="particles" id="particles"></div>
     <div class="home-container">
       <div class="logo-wrap">
-        <h1 class="logo">DRAW<span class="accent">MAFIA</span></h1>
-        <p class="tagline">Draw. Deduce. Deceive.</p>
+        <img src="/logo/logo-with-bottom-text-nobg.png" alt="Draw Mafia" class="logo-img">
       </div>
       <div class="home-form">
         <input type="text" id="input-name" class="input" placeholder="Enter your name" maxlength="20" autocomplete="off">
@@ -36,6 +36,7 @@
     <div class="lobby-layout">
       <div class="lobby-main">
         <div class="room-header">
+          <img src="/logo/logo-with-side-text-nobg.png" alt="Draw Mafia" class="lobby-logo">
           <div class="room-code-box">
             <span class="label">ROOM CODE</span>
             <span id="lobby-code" class="room-code">------</span>
@@ -112,6 +113,7 @@
           </div>
           <div id="disc-overlay" class="disc-overlay" style="display:none">
             <div class="disc-overlay-inner">
+              <img src="/logo/draw-mafia-logo-nobg.png" alt="Draw Mafia" class="screen-icon-logo">
               <h3>Discussion Phase</h3>
               <p>Who seems suspicious? Use the chat to discuss.</p>
             </div>
@@ -156,69 +158,10 @@
     </div>
   </section>
 
-  <!-- ═══════════════════ DISCUSSION SCREEN ═══════════════════ -->
-  <section id="screen-discussion" class="screen">
-    <div class="discussion-layout">
-      <div class="disc-top">
-        <h2>Discussion Phase</h2>
-        <p class="disc-prompt">Who seems suspicious?</p>
-        <div class="timer-wrap">
-          <div id="d-timer" class="timer-bar"><div id="d-timer-fill" class="timer-fill"></div></div>
-          <span id="d-timer-text" class="timer-text">60s</span>
-        </div>
-      </div>
-      <div class="disc-body">
-        <div class="disc-canvas-wrap">
-          <canvas id="disc-canvas" width="800" height="500"></canvas>
-        </div>
-        <div class="chat-panel disc-chat">
-          <div id="chat-disc" class="chat-messages"></div>
-          <div class="chat-input-wrap">
-            <input type="text" id="chat-in-disc" class="input chat-input" placeholder="Type a message..." maxlength="200">
-            <button id="btn-chat-disc" class="btn-icon btn-send">Send</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ═══════════════════ VOTING SCREEN ═══════════════════ -->
-  <section id="screen-voting" class="screen">
-    <div class="voting-container">
-      <h2>Vote for the Imposter!</h2>
-      <div class="timer-wrap">
-        <div id="v-timer" class="timer-bar"><div id="v-timer-fill" class="timer-fill"></div></div>
-        <span id="v-timer-text" class="timer-text">30s</span>
-      </div>
-      <div id="vote-cards" class="vote-grid"></div>
-      <div class="vote-actions">
-        <button id="btn-confirm-vote" class="btn btn-primary" disabled>Confirm Vote</button>
-        <button id="btn-skip-vote" class="btn btn-ghost">Skip Vote</button>
-      </div>
-      <p id="vote-count" class="vote-count">0 / 0 voted</p>
-    </div>
-  </section>
-
-  <!-- ═══════════════════ WORD GUESS SCREEN ═══════════════════ -->
-  <section id="screen-word-guess" class="screen">
-    <div class="guess-container">
-      <h2>The Imposter Has Been Caught!</h2>
-      <p id="guess-imposter" class="guess-imposter-name"></p>
-      <div id="guess-input-wrap" class="guess-input-wrap">
-        <input type="text" id="input-guess" class="input" placeholder="Guess the word..." maxlength="50" autocomplete="off">
-        <button id="btn-guess" class="btn btn-primary">Guess</button>
-      </div>
-      <p id="guess-waiting" class="guess-waiting" style="display:none">Waiting for the imposter to guess...</p>
-      <div class="timer-wrap">
-        <div id="gu-timer" class="timer-bar"><div id="gu-timer-fill" class="timer-fill"></div></div>
-        <span id="gu-timer-text" class="timer-text">15s</span>
-      </div>
-    </div>
-  </section>
-
   <!-- ═══════════════════ RESULTS SCREEN ═══════════════════ -->
   <section id="screen-results" class="screen">
     <div class="results-container">
+      <img src="/logo/draw-mafia-logo-nobg.png" alt="Draw Mafia" class="screen-icon-logo">
       <h1 id="res-title" class="res-title">Artists Win!</h1>
       <div class="res-details glass">
         <p id="res-imposter">The imposter was: <strong></strong></p>
@@ -233,6 +176,7 @@
   <!-- ═══════════════════ GAME OVER SCREEN ═══════════════════ -->
   <section id="screen-gameover" class="screen">
     <div class="gameover-container">
+      <img src="/logo/logo-with-side-text-nobg.png" alt="Draw Mafia" class="gameover-logo">
       <h1 class="gameover-title">Game Over</h1>
       <div id="final-board" class="final-board"></div>
       <div id="leaderboard-section" class="leaderboard-section" style="display:none">
@@ -240,7 +184,7 @@
       </div>
       <div class="gameover-actions">
         <button id="btn-again" class="btn btn-primary btn-lg">Play Again</button>
-        <button id="btn-lobby-back" class="btn btn-ghost">Back to Lobby</button>
+        <p id="play-again-status" class="play-again-status"></p>
       </div>
     </div>
   </section>

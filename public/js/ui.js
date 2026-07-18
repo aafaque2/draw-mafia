@@ -78,27 +78,6 @@ const UI = (() => {
     container.scrollTop = container.scrollHeight;
   }
 
-  function renderVoteCards(container, players, myId, selectedId, onselect) {
-    container.innerHTML = '';
-    players.forEach((p) => {
-      const card = el('div', 'vote-card' + (p.id === selectedId ? ' selected' : '') + (p.id === myId ? ' voted' : ''));
-      if (p.id === myId) card.style.pointerEvents = 'none';
-
-      const avatar = el('div', 'vc-avatar', (p.name || '?')[0].toUpperCase());
-      avatar.style.background = getPlayerColor(p.id);
-      const name = el('div', 'vc-name', escapeHtml(p.name));
-
-      card.appendChild(avatar);
-      card.appendChild(name);
-
-      if (p.id !== myId) {
-        card.onclick = () => onselect(p.id);
-      }
-
-      container.appendChild(card);
-    });
-  }
-
   function renderSettings(container, settings, isHost, onchange) {
     container.innerHTML = '';
     const defs = [
@@ -113,9 +92,9 @@ const UI = (() => {
       { key: 'drawingVisibility', label: 'Drawing Visibility', type: 'select', options: [
         { value: 'live', label: 'Live' }, { value: 'reveal', label: 'Reveal After Turn' },
       ]},
-      { key: 'discussionTime', label: 'Discussion (s)', type: 'range', min: 0, max: 180, step: 10 },
+      { key: 'discussionTime', label: 'Discussion (s)', type: 'range', min: 10, max: 180, step: 10 },
       { key: 'votingTime', label: 'Voting (s)', type: 'range', min: 15, max: 90, step: 5 },
-      { key: 'totalRounds', label: 'Rounds', type: 'select', options: [
+      { key: 'totalRounds', label: 'Max Rounds', type: 'select', options: [
         { value: 1, label: '1' }, { value: 2, label: '2' }, { value: 3, label: '3' },
         { value: 5, label: '5' }, { value: 10, label: '10' },
       ]},
@@ -225,6 +204,7 @@ const UI = (() => {
   }
 
   function updateTimer(fillEl, textEl, elapsed, total) {
+    if (!fillEl || !textEl || total <= 0) return;
     const remaining = Math.max(0, total - elapsed);
     const pct = (remaining / total) * 100;
     fillEl.style.width = pct + '%';
@@ -268,7 +248,6 @@ const UI = (() => {
     el,
     renderPlayerList,
     renderChat,
-    renderVoteCards,
     renderSettings,
     renderResults,
     renderScoreboard,
