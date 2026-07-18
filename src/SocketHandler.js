@@ -3,6 +3,16 @@ const GameEngine = require('./GameEngine');
 
 // --- Helper ---
 
+/** Max strokes per socket per second for draw events */
+const DRAW_RATE_LIMIT_WINDOW_MS = 1000;
+const DRAW_RATE_LIMIT_MAX = 60;
+const drawTimestamps = new Map();
+
+/** Max rooms a single socket can create per minute */
+const CREATE_RATE_LIMIT_WINDOW_MS = 60000;
+const CREATE_RATE_LIMIT_MAX = 5;
+const createTimestamps = new Map();
+
 /**
  * Strip HTML tags, trim, and truncate.
  * @param {string} str
@@ -55,6 +65,48 @@ function isRateLimited(socketId) {
  */
 function clearRateLimitData(socketId) {
   chatTimestamps.delete(socketId);
+  drawTimestamps.delete(socketId);
+  createTimestamps.delete(socketId);
+}
+
+/**
+ * Returns true if the socket has exceeded the draw rate limit.
+ * @param {string} socketId
+ * @returns {boolean}
+ */
+function isDrawRateLimited(socketId) {
+  const now = Date.now();
+  let timestamps = drawTimestamps.get(socketId);
+  if (!timestamps) {
+    timestamps = [];
+    drawTimestamps.set(socketId, timestamps);
+  }
+  while (timestamps.length > 0 && timestamps[0] <= now - DRAW_RATE_LIMIT_WINDOW_MS) {
+    timestamps.shift();
+  }
+  if (timestamps.length >= DRAW_RATE_LIMIT_MAX) return true;
+  timestamps.push(now);
+  return false;
+}
+
+/**
+ * Returns true if the socket has exceeded the create-room rate limit.
+ * @param {string} socketId
+ * @returns {boolean}
+ */
+function isCreateRateLimited(socketId) {
+  const now = Date.now();
+  let timestamps = createTimestamps.get(socketId);
+  if (!timestamps) {
+    timestamps = [];
+    createTimestamps.set(socketId, timestamps);
+  }
+  while (timestamps.length > 0 && timestamps[0] <= now - CREATE_RATE_LIMIT_WINDOW_MS) {
+    timestamps.shift();
+  }
+  if (timestamps.length >= CREATE_RATE_LIMIT_MAX) return true;
+  timestamps.push(now);
+  return false;
 }
 
 // --- Socket Setup ---
@@ -69,6 +121,11 @@ function setupSocket(io) {
     // ---- create-room ----
     socket.on('create-room', (data) => {
       try {
+        if (isCreateRateLimited(socket.id)) {
+          socket.emit('error', { message: 'Too many rooms created. Wait a moment.' });
+          return;
+        }
+
         const playerName = sanitizeString(data && data.playerName, 20);
         if (!playerName) {
           socket.emit('error', { message: 'Player name is required' });
@@ -105,6 +162,10 @@ function setupSocket(io) {
         }
 
         roomCode = roomCode.trim().toUpperCase();
+        if (!/^[A-Z0-9]{1,10}$/.test(roomCode)) {
+          socket.emit('error', { message: 'Invalid room code format' });
+          return;
+        }
 
         const result = RoomManager.joinRoom(roomCode, socket.id, playerName);
 
@@ -289,6 +350,7 @@ function setupSocket(io) {
     // ---- draw ----
     socket.on('draw', (strokeData) => {
       try {
+        if (isDrawRateLimited(socket.id)) return;
         const roomInfo = RoomManager.getRoomBySocketId(socket.id);
         if (!roomInfo) return;
 
@@ -296,7 +358,6 @@ function setupSocket(io) {
         GameEngine.handleDraw(io, room, playerId, strokeData);
       } catch (err) {
         console.error('[draw]', err);
-        socket.emit('error', { message: 'An error occurred' });
       }
     });
 

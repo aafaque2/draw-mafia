@@ -29,7 +29,7 @@ function clearGameTimer(gameState) {
 
 function sanitizeMessage(msg) {
   if (typeof msg !== 'string') return '';
-  return msg.replace(/<[^>]*>/g, '').trim().slice(0, 200);
+  return msg.replace(/<[^>]*>/g, '').replace(/[<>]/g, '').trim().slice(0, 200);
 }
 
 // ─── Score calculation ──────────────────────────────────────────────────────
@@ -277,14 +277,29 @@ const GameEngine = {
     const currentPlayer = gs.turnOrder[gs.currentTurnIndex];
     if (playerId !== currentPlayer) return;
 
+    if (!strokeData || typeof strokeData !== 'object') return;
+    const VALID_TOOLS = new Set(['pen', 'eraser']);
+    if (!VALID_TOOLS.has(strokeData.tool)) return;
+    if (!Array.isArray(strokeData.points) || strokeData.points.length === 0 || strokeData.points.length > 500) return;
+    if (typeof strokeData.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(strokeData.color)) return;
+    if (typeof strokeData.size !== 'number' || strokeData.size < 1 || strokeData.size > 100) return;
+    for (const pt of strokeData.points) {
+      if (!pt || typeof pt.x !== 'number' || typeof pt.y !== 'number') return;
+      if (pt.x < 0 || pt.x > 1 || pt.y < 0 || pt.y > 1) return;
+    }
+
     const drawingVisibility =
       (room.settings && room.settings.drawingVisibility) || 'live';
 
     if (drawingVisibility === 'live') {
-      gs.canvasStrokes.push(strokeData);
+      if (gs.canvasStrokes.length < 2000) {
+        gs.canvasStrokes.push(strokeData);
+      }
       io.to(room.code).emit('stroke', strokeData);
     } else {
-      gs.turnStrokes.push(strokeData);
+      if (gs.turnStrokes.length < 500) {
+        gs.turnStrokes.push(strokeData);
+      }
     }
   },
 

@@ -1,6 +1,8 @@
+const crypto = require('crypto');
 const rooms = new Map();
 const socketToRoom = new Map();
 const persistentScores = new Map();
+const MAX_PERSISTENT_SCORES = 5000;
 
 const DEFAULT_SETTINGS = {
   mode: 'classic',
@@ -26,13 +28,9 @@ const SETTINGS_RANGES = {
 };
 
 function generateRoomCode() {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let code;
   do {
-    code = '';
-    for (let i = 0; i < 6; i++) {
-      code += chars[Math.floor(Math.random() * chars.length)];
-    }
+    code = crypto.randomBytes(3).toString('hex').toUpperCase();
   } while (rooms.has(code));
   return code;
 }
@@ -252,7 +250,12 @@ function getPersistentScore(name) {
 
 function setPersistentScore(name, score) {
   if (!name) return;
-  persistentScores.set(name.toLowerCase(), score);
+  const key = name.toLowerCase();
+  persistentScores.set(key, score);
+  if (persistentScores.size > MAX_PERSISTENT_SCORES) {
+    const oldest = persistentScores.keys().next().value;
+    persistentScores.delete(oldest);
+  }
 }
 
 function getLeaderboard(count) {
@@ -266,7 +269,7 @@ function getLeaderboard(count) {
 
 setInterval(() => {
   rooms.forEach((room, code) => {
-    if (room.state === 'lobby' && room.players.size === 0) {
+    if (room.players.size === 0) {
       rooms.delete(code);
     }
   });
