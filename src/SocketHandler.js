@@ -60,16 +60,6 @@ function isRateLimited(socketId) {
 }
 
 /**
- * Remove rate-limit tracking data for a disconnected socket.
- * @param {string} socketId
- */
-function clearRateLimitData(socketId) {
-  chatTimestamps.delete(socketId);
-  drawTimestamps.delete(socketId);
-  createTimestamps.delete(socketId);
-}
-
-/**
  * Returns true if the socket has exceeded the draw rate limit.
  * @param {string} socketId
  * @returns {boolean}
@@ -107,6 +97,16 @@ function isCreateRateLimited(socketId) {
   if (timestamps.length >= CREATE_RATE_LIMIT_MAX) return true;
   timestamps.push(now);
   return false;
+}
+
+/**
+ * Remove rate-limit tracking data for a disconnected socket.
+ * @param {string} socketId
+ */
+function clearRateLimitData(socketId) {
+  chatTimestamps.delete(socketId);
+  drawTimestamps.delete(socketId);
+  createTimestamps.delete(socketId);
 }
 
 // --- Socket Setup ---
@@ -210,7 +210,6 @@ function setupSocket(io) {
 
         const { roomCode, playerId, room } = roomInfo;
 
-        // Don't allow explicit leave during game — use disconnect instead
         if (room.state === 'playing') return;
 
         socket.leave(roomCode);
@@ -218,13 +217,16 @@ function setupSocket(io) {
         const result = RoomManager.leaveRoom(roomCode, playerId);
 
         if (result.roomDeleted) {
-          // Room no longer exists; nothing more to emit.
           return;
         }
 
         socket.to(roomCode).emit('player-left', {
           playerId,
           newHost: result.newHost || null,
+        });
+
+        io.to(roomCode).emit('room-updated', {
+          room: RoomManager.getSanitizedRoom(roomCode),
         });
       } catch (err) {
         console.error('[leave-room]', err);
@@ -473,6 +475,40 @@ function setupSocket(io) {
       }
     });
 
+    // ---- play-again ----
+    socket.on('play-again', () => {
+      try {
+        const roomInfo = RoomManager.getRoomBySocketId(socket.id);
+        if (!roomInfo) {
+          socket.emit('error', { message: 'Room not found' });
+          return;
+        }
+
+        const { room, playerId } = roomInfo;
+        GameEngine.handlePlayAgain(io, room, playerId);
+      } catch (err) {
+        console.error('[play-again]', err);
+        socket.emit('error', { message: 'An error occurred' });
+      }
+    });
+
+    // ---- start-next-round ----
+    socket.on('start-next-round', () => {
+      try {
+        const roomInfo = RoomManager.getRoomBySocketId(socket.id);
+        if (!roomInfo) {
+          socket.emit('error', { message: 'Room not found' });
+          return;
+        }
+
+        const { room, playerId } = roomInfo;
+        GameEngine.handleStartNextRound(io, room, playerId);
+      } catch (err) {
+        console.error('[start-next-round]', err);
+        socket.emit('error', { message: 'An error occurred' });
+      }
+    });
+
     // ---- disconnect ----
     socket.on('disconnect', () => {
       try {
@@ -483,8 +519,9 @@ function setupSocket(io) {
 
         const { roomCode, playerId, room } = roomInfo;
 
+        const player = room.players.get(playerId);
+
         if (room.state === 'playing' && room.gameState) {
-          const player = room.players.get(playerId);
           const wasHost = player && player.isHost;
 
           if (player) {
@@ -508,6 +545,9 @@ function setupSocket(io) {
               newHostId = firstId;
             }
             if (newHostId) {
+              for (const [, p] of room.players) {
+                p.isHost = false;
+              }
               const h = room.players.get(newHostId);
               if (h) h.isHost = true;
               room.host = newHostId;
@@ -524,6 +564,45 @@ function setupSocket(io) {
               room: RoomManager.getSanitizedRoom(roomCode),
             });
           }
+        } else if (room.gameState && room.gameState.phase === 'game-over') {
+          GameEngine.handleDisconnect(io, room, playerId);
+
+          const wasHost = player && player.isHost;
+          const result = RoomManager.leaveRoom(roomCode, playerId);
+
+          if (wasHost && !result.roomDeleted) {
+            let newHostId = null;
+            for (const [id, p] of room.players) {
+              if (p.isConnected) {
+                newHostId = id;
+                break;
+              }
+            }
+            if (!newHostId && room.players.size > 0) {
+              const [firstId] = room.players.keys();
+              newHostId = firstId;
+            }
+            if (newHostId) {
+              for (const [, p] of room.players) {
+                p.isHost = false;
+              }
+              const h = room.players.get(newHostId);
+              if (h) h.isHost = true;
+              room.host = newHostId;
+              io.to(roomCode).emit('host-changed', { newHostId });
+            }
+          }
+
+          if (!result.roomDeleted) {
+            socket.to(roomCode).emit('player-left', {
+              playerId,
+              newHost: result.newHost || null,
+            });
+
+            io.to(roomCode).emit('room-updated', {
+              room: RoomManager.getSanitizedRoom(roomCode),
+            });
+          }
         } else {
           const result = RoomManager.leaveRoom(roomCode, playerId);
 
@@ -531,6 +610,10 @@ function setupSocket(io) {
             socket.to(roomCode).emit('player-left', {
               playerId,
               newHost: result.newHost || null,
+            });
+
+            io.to(roomCode).emit('room-updated', {
+              room: RoomManager.getSanitizedRoom(roomCode),
             });
           }
         }

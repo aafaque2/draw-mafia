@@ -21,7 +21,7 @@ const SETTINGS_RANGES = {
   maxPlayers: { min: 3, max: 12 },
   drawTime: { min: 5, max: 30 },
   drawingPasses: { min: 1, max: 3 },
-  discussionTime: { min: 0, max: 180 },
+  discussionTime: { min: 10, max: 180 },
   votingTime: { min: 15, max: 90 },
   totalRounds: { min: 1, max: 10 },
   imposterCount: { min: 1, max: 2 },

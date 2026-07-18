@@ -96,6 +96,20 @@ function calculateScores(room, result) {
       break;
     }
 
+    case 'wrong-vote': {
+      gs.imposters.forEach((id) => {
+        if (roundScores[id] !== undefined) {
+          roundScores[id] += isBlind ? 180 : 150;
+        }
+      });
+      wrongVoters.forEach((id) => {
+        if (roundScores[id] !== undefined) {
+          roundScores[id] -= 50;
+        }
+      });
+      break;
+    }
+
     default:
       break;
   }
@@ -112,11 +126,14 @@ function calculateScores(room, result) {
 
 const GameEngine = {
   startGame(io, room) {
+    if (room.state !== 'lobby') return { error: 'Game already in progress' };
+
     const connected = getConnectedPlayers(room);
     const imposterCount = (room.settings && room.settings.imposterCount) || 1;
 
-    if (room.state !== 'lobby' && room.state !== 'finished') return { error: 'Game already in progress' };
     if (connected.length < imposterCount + 2) return { error: 'Not enough players' };
+
+    room.state = 'playing';
 
     const wordBankSession = WordBank.createSession();
 
@@ -146,7 +163,6 @@ const GameEngine = {
       wordBankSession,
     };
 
-    room.state = 'playing';
     io.to(room.code).emit('game-started');
 
     GameEngine.startRound(io, room);
@@ -156,10 +172,15 @@ const GameEngine = {
     const gs = room.gameState;
     clearGameTimer(gs);
 
-    gs.round++;
-
     const connected = getConnectedPlayers(room);
     const imposterCount = (room.settings && room.settings.imposterCount) || 1;
+
+    if (connected.length < imposterCount + 2) {
+      GameEngine.endGame(io, room);
+      return;
+    }
+
+    gs.round++;
 
     const shuffled = shuffleArray(connected);
     gs.imposters = shuffled.slice(0, imposterCount);
@@ -248,6 +269,24 @@ const GameEngine = {
     const gs = room.gameState;
     clearGameTimer(gs);
 
+    const imposterCount = (room.settings && room.settings.imposterCount) || 1;
+    const connected = getConnectedPlayers(room);
+    if (connected.length < imposterCount + 2) {
+      const connectedImposters = gs.imposters.filter((id) => {
+        const p = room.players.get(id);
+        return p && p.isConnected;
+      });
+      if (connectedImposters.length === 0) {
+        GameEngine.endRound(io, room, {
+          result: 'imposter-disconnected',
+          caughtImposters: gs.imposters,
+        });
+      } else {
+        GameEngine.endRound(io, room, { result: 'survived' });
+      }
+      return;
+    }
+
     const currentPlayer = gs.turnOrder[gs.currentTurnIndex];
     const player = room.players.get(currentPlayer);
 
@@ -322,7 +361,9 @@ const GameEngine = {
 
     if (drawingVisibility === 'reveal' && gs.turnStrokes.length > 0) {
       io.to(room.code).emit('turn-strokes', gs.turnStrokes);
-      gs.canvasStrokes.push(...gs.turnStrokes);
+      for (let i = 0; i < gs.turnStrokes.length; i++) {
+        gs.canvasStrokes.push(gs.turnStrokes[i]);
+      }
       gs.turnStrokes = [];
     }
 
@@ -370,6 +411,9 @@ const GameEngine = {
   },
 
   handleChat(io, room, playerId, message) {
+    const gs = room.gameState;
+    if (gs && (gs.phase === 'role-reveal' || gs.phase === 'results' || gs.phase === 'game-over' || gs.phase === 'word-guess')) return;
+
     const sanitized = sanitizeMessage(message);
     if (!sanitized) return;
 
@@ -432,6 +476,7 @@ const GameEngine = {
 
   resolveVote(io, room) {
     const gs = room.gameState;
+    if (!gs || gs.phase === 'results') return;
     clearGameTimer(gs);
 
     const tally = {};
@@ -452,7 +497,9 @@ const GameEngine = {
     let accusedId = null;
     let wasImposter = false;
 
-    if (topTargets.length === 1 && maxVotes > 0) {
+    const skipCount = Object.values(gs.votes).filter((v) => v === '__skip__').length;
+
+    if (topTargets.length === 1 && maxVotes > 0 && maxVotes > skipCount) {
       accusedId = topTargets[0];
       wasImposter = impostersSet.has(accusedId);
     }
@@ -472,7 +519,13 @@ const GameEngine = {
           caughtImposters: [accusedId],
         });
       }
+    } else if (accusedId && !wasImposter) {
+      GameEngine.endRound(io, room, {
+        result: 'wrong-vote',
+        ejectedId: accusedId,
+      });
     } else {
+      // Tie or all skipped — round counts, continue to next
       GameEngine.endRound(io, room, { result: 'survived' });
     }
   },
@@ -529,6 +582,7 @@ const GameEngine = {
   handleSnipe(io, room, playerId, guess) {
     const gs = room.gameState;
     if (!gs || gs.phase !== 'voting') return;
+    if (gs.mode === 'blind') return;
     if (!gs.imposters.includes(playerId)) return;
     if (gs.snipeUsed) return;
 
@@ -561,6 +615,7 @@ const GameEngine = {
 
   endRound(io, room, result) {
     const gs = room.gameState;
+    if (!gs || gs.phase === 'results') return;
     clearGameTimer(gs);
 
     gs.phase = 'results';
@@ -578,15 +633,26 @@ const GameEngine = {
       totalRounds: gs.totalRounds,
     });
 
-    const gameOverEarly = result.result === 'caught' || result.result === 'word-guessed' || result.result === 'imposter-disconnected';
-    if (gameOverEarly || gs.round >= gs.totalRounds) {
+    const gameOver =
+      result.result === 'caught' ||
+      result.result === 'word-guessed' ||
+      result.result === 'imposter-disconnected' ||
+      result.result === 'wrong-vote' ||
+      gs.round >= gs.totalRounds;
+
+    if (gameOver) {
       gs.timer = setTimeout(() => {
         GameEngine.endGame(io, room);
-      }, 8000);
+      }, 5000);
     } else {
       gs.timer = setTimeout(() => {
-        GameEngine.startRound(io, room);
-      }, 8000);
+        room.state = 'lobby';
+        io.to(room.code).emit('between-rounds', {
+          round: gs.round,
+          totalRounds: gs.totalRounds,
+          room: RoomManager.getSanitizedRoom(room.code),
+        });
+      }, 5000);
     }
   },
 
@@ -595,15 +661,22 @@ const GameEngine = {
     clearGameTimer(gs);
 
     room.state = 'lobby';
-    room.gameState = null;
     room.currentRound = 0;
 
-    room.players.forEach((p, id) => {
-      if (gs.scores[id] !== undefined) {
+    Object.keys(gs.scores).forEach((id) => {
+      const p = room.players.get(id);
+      if (p) {
         RoomManager.setPersistentScore(p.name, gs.scores[id]);
+        p.score = RoomManager.getPersistentScore(p.name);
+      } else {
+        RoomManager.setPersistentScore(id, gs.scores[id]);
       }
-      p.score = RoomManager.getPersistentScore(p.name);
-      p.isConnected = true;
+    });
+
+    room.players.forEach((p, id) => {
+      if (gs.scores[id] === undefined) {
+        p.score = RoomManager.getPersistentScore(p.name);
+      }
     });
 
     const finalScores = [];
@@ -618,22 +691,101 @@ const GameEngine = {
 
     const leaderboard = RoomManager.getLeaderboard(10);
 
-    io.to(room.code).emit('game-over', { finalScores, leaderboard });
+    room.gameState = {
+      phase: 'game-over',
+      playAgain: new Set(),
+      playAgainTimer: null,
+    };
 
-    gs.timer = setTimeout(() => {
-      io.to(room.code).emit('returned-to-lobby');
-    }, 10000);
+    io.to(room.code).emit('game-over', { finalScores, leaderboard });
+  },
+
+  handlePlayAgain(io, room, playerId) {
+    const gs = room.gameState;
+    if (!gs || gs.phase !== 'game-over') return;
+    if (gs.playAgain.has(playerId)) return;
+
+    gs.playAgain.add(playerId);
+
+    io.to(room.code).emit('play-again-updated', {
+      playAgainPlayers: Array.from(gs.playAgain),
+    });
+
+    const totalPlayers = room.players.size;
+    const allClicked = gs.playAgain.size >= totalPlayers;
+
+    if (allClicked) {
+      GameEngine.finishPlayAgain(io, room);
+    } else if (gs.playAgain.size === 1) {
+      gs.playAgainTimer = setTimeout(() => {
+        GameEngine.finishPlayAgain(io, room);
+      }, 30000);
+    }
+  },
+
+  finishPlayAgain(io, room) {
+    const gs = room.gameState;
+    if (!gs || gs.phase !== 'game-over') return;
+
+    if (gs.playAgainTimer) {
+      clearTimeout(gs.playAgainTimer);
+      gs.playAgainTimer = null;
+    }
+
+    const toRemove = [];
+    room.players.forEach((p, id) => {
+      if (!gs.playAgain.has(id)) {
+        toRemove.push(id);
+      }
+    });
+
+    room.gameState = null;
+
+    toRemove.forEach((id) => {
+      const p = room.players.get(id);
+      if (p) {
+        const socket = io.sockets.sockets.get(p.socketId);
+        if (socket) {
+          socket.leave(room.code);
+          socket.emit('removed-from-room', { reason: 'Did not click Play Again' });
+        }
+        RoomManager.leaveRoom(room.code, id);
+      }
+    });
+
+    if (room.players.size === 0) {
+      RoomManager.deleteRoom(room.code);
+      return;
+    }
+
+    io.to(room.code).emit('returned-to-lobby', {
+      room: RoomManager.getSanitizedRoom(room.code),
+    });
   },
 
   handleDisconnect(io, room, playerId) {
     const gs = room.gameState;
     if (!gs) return;
 
+    if (gs.phase === 'game-over') {
+      if (gs.playAgain) gs.playAgain.delete(playerId);
+      return;
+    }
+
+    if (gs.phase === 'results') {
+      Object.keys(gs.scores).forEach((id) => {
+        const p = room.players.get(id);
+        if (p) {
+          RoomManager.setPersistentScore(p.name, gs.scores[id]);
+        }
+      });
+      return;
+    }
+
     if (gs.phase === 'drawing') {
       const currentPlayer = gs.turnOrder[gs.currentTurnIndex];
       if (currentPlayer === playerId) {
         GameEngine.endTurn(io, room);
-        return;
       }
     }
 
@@ -683,6 +835,18 @@ const GameEngine = {
         });
       }
     }
+  },
+
+  handleStartNextRound(io, room, playerId) {
+    if (room.state !== 'lobby') return;
+    const player = room.players.get(playerId);
+    if (!player || !player.isHost) return;
+
+    const minPlayers = (room.settings.imposterCount || 1) + 2;
+    if (room.players.size < minPlayers) return;
+
+    room.state = 'playing';
+    GameEngine.startRound(io, room);
   },
 };
 
