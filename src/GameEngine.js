@@ -110,6 +110,15 @@ function calculateScores(room, result) {
       break;
     }
 
+    case 'word-guessed': {
+      gs.imposters.forEach((id) => {
+        if (roundScores[id] !== undefined) {
+          roundScores[id] += 250;
+        }
+      });
+      break;
+    }
+
     default:
       break;
   }
@@ -137,6 +146,18 @@ const GameEngine = {
 
     const wordBankSession = WordBank.createSession();
 
+    const category = (room.settings && room.settings.wordCategory) || 'all';
+    let word = null;
+    let imposterWord = null;
+    const mode = (room.settings && room.settings.mode) || 'classic';
+    if (mode === 'blind') {
+      const pair = wordBankSession.getWordPair(category);
+      word = pair.artistWord;
+      imposterWord = pair.imposterWord;
+    } else {
+      word = wordBankSession.getRandomWord(category);
+    }
+
     const scores = {};
     connected.forEach((id) => {
       const player = room.players.get(id);
@@ -148,8 +169,8 @@ const GameEngine = {
       round: 0,
       totalRounds: (room.settings && room.settings.totalRounds) || 3,
       phase: null,
-      word: null,
-      imposterWord: null,
+      word,
+      imposterWord,
       imposters: [],
       artists: [],
       turnOrder: [],
@@ -185,16 +206,6 @@ const GameEngine = {
     const shuffled = shuffleArray(connected);
     gs.imposters = shuffled.slice(0, imposterCount);
     gs.artists = shuffled.slice(imposterCount);
-
-    const category = (room.settings && room.settings.wordCategory) || 'all';
-    if (gs.mode === 'blind') {
-      const pair = gs.wordBankSession.getWordPair(category);
-      gs.word = pair.artistWord;
-      gs.imposterWord = pair.imposterWord;
-    } else {
-      gs.word = gs.wordBankSession.getRandomWord(category);
-      gs.imposterWord = null;
-    }
 
     gs.turnOrder = shuffleArray(connected);
     gs.votes = {};
