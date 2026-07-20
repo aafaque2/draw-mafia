@@ -606,9 +606,13 @@
       return p ? p.name : id;
     });
     const resImposter = $('#res-imposter');
-    if (resImposter) {
-      const strong = resImposter.querySelector('strong');
-      if (strong) strong.textContent = imposterNames.join(', ');
+    if (data.gameOver) {
+      if (resImposter) {
+        const strong = resImposter.querySelector('strong');
+        if (strong) strong.textContent = imposterNames.join(', ');
+      }
+    } else {
+      if (resImposter) resImposter.style.display = 'none';
     }
     const resWord = $('#res-word');
     if (data.gameOver) {

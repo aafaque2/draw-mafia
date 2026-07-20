@@ -164,6 +164,10 @@ const GameEngine = {
       scores[id] = player ? RoomManager.getPersistentScore(player.name) : 0;
     });
 
+    const shuffled = shuffleArray(connected);
+    const imposters = shuffled.slice(0, imposterCount);
+    const artists = shuffled.slice(imposterCount);
+
     room.gameState = {
       mode: (room.settings && room.settings.mode) || 'classic',
       round: 0,
@@ -171,8 +175,8 @@ const GameEngine = {
       phase: null,
       word,
       imposterWord,
-      imposters: [],
-      artists: [],
+      imposters,
+      artists,
       turnOrder: [],
       currentTurnIndex: 0,
       currentPass: 1,
@@ -203,9 +207,8 @@ const GameEngine = {
 
     gs.round++;
 
-    const shuffled = shuffleArray(connected);
-    gs.imposters = shuffled.slice(0, imposterCount);
-    gs.artists = shuffled.slice(imposterCount);
+    const impostersSet = new Set(gs.imposters);
+    gs.artists = connected.filter((id) => !impostersSet.has(id));
 
     gs.turnOrder = shuffleArray(connected);
     gs.votes = {};
@@ -216,7 +219,6 @@ const GameEngine = {
     gs.phase = 'role-reveal';
     gs.snipeUsed = false;
 
-    const impostersSet = new Set(gs.imposters);
     connected.forEach((playerId) => {
       const player = room.players.get(playerId);
       if (!player || !player.socketId) return;
