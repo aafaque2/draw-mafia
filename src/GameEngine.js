@@ -271,7 +271,7 @@ const GameEngine = {
 
     const imposterCount = (room.settings && room.settings.imposterCount) || 1;
     const connected = getConnectedPlayers(room);
-    if (connected.length < imposterCount + 2) {
+    if (connected.length <= imposterCount * 2) {
       const connectedImposters = gs.imposters.filter((id) => {
         const p = room.players.get(id);
         return p && p.isConnected;
@@ -282,7 +282,10 @@ const GameEngine = {
           caughtImposters: gs.imposters,
         });
       } else {
-        GameEngine.endRound(io, room, { result: 'survived' });
+        GameEngine.endRound(io, room, {
+          result: 'wrong-vote',
+          gameOver: true,
+        });
       }
       return;
     }
@@ -520,9 +523,16 @@ const GameEngine = {
         });
       }
     } else if (accusedId && !wasImposter) {
+      const p = room.players.get(accusedId);
+      if (p) p.isConnected = false;
+
+      const remaining = getConnectedPlayers(room).length;
+      const imposterCount = (room.settings && room.settings.imposterCount) || 1;
+
       GameEngine.endRound(io, room, {
         result: 'wrong-vote',
         ejectedId: accusedId,
+        gameOver: remaining <= imposterCount * 2,
       });
     } else {
       // Tie or all skipped — round counts, continue to next
@@ -622,6 +632,13 @@ const GameEngine = {
 
     const roundScores = calculateScores(room, result);
 
+    const gameOver =
+      result.gameOver ||
+      result.result === 'caught' ||
+      result.result === 'word-guessed' ||
+      result.result === 'imposter-disconnected' ||
+      gs.round >= gs.totalRounds;
+
     io.to(room.code).emit('round-results', {
       result: result.result,
       word: gs.word,
@@ -631,14 +648,9 @@ const GameEngine = {
       roundScores,
       round: gs.round,
       totalRounds: gs.totalRounds,
+      ejectedId: result.ejectedId || null,
+      gameOver,
     });
-
-    const gameOver =
-      result.result === 'caught' ||
-      result.result === 'word-guessed' ||
-      result.result === 'imposter-disconnected' ||
-      result.result === 'wrong-vote' ||
-      gs.round >= gs.totalRounds;
 
     if (gameOver) {
       gs.timer = setTimeout(() => {
@@ -794,25 +806,19 @@ const GameEngine = {
     }
 
     const imposterCount = (room.settings && room.settings.imposterCount) || 1;
-    const minPlayers = imposterCount + 2;
     const connected = getConnectedPlayers(room);
 
-    if (connected.length < minPlayers) {
+    if (connected.length <= imposterCount * 2) {
       if (gs.imposters.includes(playerId)) {
         GameEngine.endRound(io, room, {
           result: 'imposter-disconnected',
           caughtImposters: gs.imposters,
         });
       } else {
-        const connectedImposters = gs.imposters.filter((id) => {
-          const p = room.players.get(id);
-          return p && p.isConnected;
+        GameEngine.endRound(io, room, {
+          result: 'wrong-vote',
+          gameOver: true,
         });
-        if (connectedImposters.length > 0) {
-          GameEngine.endRound(io, room, {
-            result: 'survived',
-          });
-        }
       }
       return;
     }

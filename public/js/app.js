@@ -650,11 +650,10 @@
     }
 
     let remaining = 5;
-    const isLastRound = data.round >= data.totalRounds;
     const countEl = $('#res-next-count');
     const resNextEl = $('#res-next');
     if (resNextEl) {
-      const prefix = isLastRound ? 'Showing final results in ' : 'Returning to lobby in ';
+      const prefix = data.gameOver ? 'Game Over in ' : 'Next round in ';
       if (countEl) {
         countEl.textContent = remaining;
         resNextEl.innerHTML = prefix + '<span id="res-next-count">' + remaining + '</span>s...';
