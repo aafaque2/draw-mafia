@@ -492,23 +492,6 @@ function setupSocket(io) {
       }
     });
 
-    // ---- start-next-round ----
-    socket.on('start-next-round', () => {
-      try {
-        const roomInfo = RoomManager.getRoomBySocketId(socket.id);
-        if (!roomInfo) {
-          socket.emit('error', { message: 'Room not found' });
-          return;
-        }
-
-        const { room, playerId } = roomInfo;
-        GameEngine.handleStartNextRound(io, room, playerId);
-      } catch (err) {
-        console.error('[start-next-round]', err);
-        socket.emit('error', { message: 'An error occurred' });
-      }
-    });
-
     // ---- disconnect ----
     socket.on('disconnect', () => {
       try {

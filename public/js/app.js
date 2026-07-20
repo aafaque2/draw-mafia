@@ -23,7 +23,6 @@
     timerStart: 0,
     timerDuration: 0,
     codeRevealed: true,
-    betweenRound: false,
   };
 
   const $ = (s) => document.querySelector(s);
@@ -124,7 +123,6 @@
     });
 
     state.socket.on('round-started', (data) => {
-      state.betweenRound = false;
       state.currentPhase = 'role-reveal';
       const gRound = $('#g-round');
       if (gRound) gRound.textContent = 'Round ' + data.round + '/' + data.totalRounds;
@@ -253,25 +251,6 @@
 
     state.socket.on('game-over', (data) => showGameOver(data));
 
-    state.socket.on('between-rounds', (data) => {
-      state.betweenRound = true;
-      state.myRole = null;
-      state.myWord = null;
-      state.currentPhase = null;
-      state.currentTurnId = null;
-      state.votes = {};
-      state.selectedVote = null;
-      DrawCanvas.clearCanvas();
-      clearUITimer();
-      removeSnipeOverlay();
-      if (data && data.room) applyRoomState(data.room);
-      UI.toast('Round ' + data.round + ' of ' + data.totalRounds + ' complete', 'info');
-      showScreen('lobby');
-      updateLobbyPlayers();
-      renderLobbySettings();
-      updateStartButton();
-    });
-
     state.socket.on('returned-to-lobby', (data) => {
       state.roomState = 'lobby';
       state.myRole = null;
@@ -348,23 +327,17 @@
     const minPlayers = imposterCount + 2;
     const canStart = state.isHost && state.players.length >= minPlayers;
     btn.disabled = !canStart;
-    if (state.betweenRound) {
-      if (canStart) btn.textContent = 'Start Next Round';
-      else if (state.isHost) btn.textContent = `Start Next Round (${state.players.length}/${minPlayers} min)`;
-      else btn.textContent = 'Waiting for host...';
-    } else {
-      if (canStart) btn.textContent = 'Start Game';
-      else if (state.isHost) btn.textContent = `Start Game (${state.players.length}/${minPlayers} min)`;
-      else btn.textContent = 'Waiting for host...';
-    }
+    if (canStart) btn.textContent = 'Start Game';
+    else if (state.isHost) btn.textContent = `Start Game (${state.players.length}/${minPlayers} min)`;
+    else btn.textContent = 'Waiting for host...';
   }
 
   function renderLobbySettings() {
     const section = $('#settings-section');
     const container = $('#settings-controls');
     if (!section || !container) return;
-    section.style.display = (state.isHost && !state.betweenRound) ? '' : 'none';
-    UI.renderSettings(container, state.settings, state.isHost && !state.betweenRound, (changes) => {
+    section.style.display = state.isHost ? '' : 'none';
+    UI.renderSettings(container, state.settings, state.isHost, (changes) => {
       state.socket.emit('update-settings', { settings: changes });
     });
   }
@@ -781,7 +754,6 @@
     state.votes = {};
     state.selectedVote = null;
     state.roomState = 'lobby';
-    state.betweenRound = false;
     clearUITimer();
   }
 
@@ -828,12 +800,7 @@
     $('#btn-start').onclick = () => {
       const btn = $('#btn-start');
       if (btn) btn.disabled = true;
-      if (state.betweenRound) {
-        state.betweenRound = false;
-        state.socket.emit('start-next-round');
-      } else {
-        state.socket.emit('start-game');
-      }
+      state.socket.emit('start-game');
     };
 
     $('#btn-leave').onclick = () => {

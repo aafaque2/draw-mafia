@@ -646,12 +646,7 @@ const GameEngine = {
       }, 5000);
     } else {
       gs.timer = setTimeout(() => {
-        room.state = 'lobby';
-        io.to(room.code).emit('between-rounds', {
-          round: gs.round,
-          totalRounds: gs.totalRounds,
-          room: RoomManager.getSanitizedRoom(room.code),
-        });
+        GameEngine.startRound(io, room);
       }, 5000);
     }
   },
@@ -835,18 +830,6 @@ const GameEngine = {
         });
       }
     }
-  },
-
-  handleStartNextRound(io, room, playerId) {
-    if (room.state !== 'lobby') return;
-    const player = room.players.get(playerId);
-    if (!player || !player.isHost) return;
-
-    const minPlayers = (room.settings.imposterCount || 1) + 2;
-    if (room.players.size < minPlayers) return;
-
-    room.state = 'playing';
-    GameEngine.startRound(io, room);
   },
 };
 
