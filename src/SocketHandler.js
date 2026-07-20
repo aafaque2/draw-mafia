@@ -480,7 +480,7 @@ function setupSocket(io) {
       try {
         const roomInfo = RoomManager.getRoomBySocketId(socket.id);
         if (!roomInfo) {
-          socket.emit('error', { message: 'Room not found' });
+          socket.emit('removed-from-room', { reason: 'Room no longer exists' });
           return;
         }
 

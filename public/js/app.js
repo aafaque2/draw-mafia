@@ -611,12 +611,16 @@
       if (strong) strong.textContent = imposterNames.join(', ');
     }
     const resWord = $('#res-word');
-    if (resWord) {
-      const strong = resWord.querySelector('strong');
-      if (strong) strong.textContent = data.word || '???';
+    if (data.gameOver) {
+      if (resWord) {
+        const strong = resWord.querySelector('strong');
+        if (strong) strong.textContent = data.word || '???';
+      }
+    } else {
+      if (resWord) resWord.style.display = 'none';
     }
 
-    if (data.imposterWord && state.settings.mode === 'blind') {
+    if (data.gameOver && data.imposterWord && state.settings.mode === 'blind') {
       const resBlind = $('#res-blind');
       if (resBlind) {
         resBlind.style.display = '';
@@ -636,7 +640,7 @@
 
     const scoreContainer = $('#res-scores');
     scoreContainer.innerHTML = '';
-    if (data.roundScores) {
+    if (data.gameOver && data.roundScores) {
       Object.keys(data.roundScores).forEach((id) => {
         const p = state.players.find((pl) => pl.id === id);
         const name = p ? p.name : id;
