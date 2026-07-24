@@ -136,7 +136,10 @@
         case 'drawing':
           showScreen('game');
           hideAllBottomBars();
-          DrawCanvas.clearCanvas();
+          if (!data.persistDrawings) {
+            DrawCanvas.clearCanvas();
+          }
+          DrawCanvas.setLiveStreaming(data.drawingVisibility === 'live');
           DrawCanvas.disableDrawing();
           requestAnimationFrame(() => {
             DrawCanvas.resize();
@@ -206,6 +209,7 @@
       const banner = $('#turn-banner');
       if (banner) banner.style.display = 'none';
       DrawCanvas.disableDrawing();
+      DrawCanvas.handleDrawEnd({});
       const drawTools = $('#draw-tools');
       if (drawTools) drawTools.style.display = 'none';
     });
@@ -213,6 +217,16 @@
     state.socket.on('stroke', (data) => DrawCanvas.addRemoteStroke(data));
 
     state.socket.on('turn-strokes', (data) => DrawCanvas.revealTurnStrokes(data));
+
+    state.socket.on('draw-start', (data) => DrawCanvas.handleDrawStart(data));
+    state.socket.on('draw-points', (data) => DrawCanvas.handleDrawPoints(data));
+    state.socket.on('draw-end', (data) => DrawCanvas.handleDrawEnd(data));
+
+    state.socket.on('canvas-strokes', (strokes) => {
+      if (strokes && Array.isArray(strokes)) {
+        strokes.forEach((s) => DrawCanvas.addRemoteStroke(s));
+      }
+    });
 
     state.socket.on('chat-message', (data) => {
       AudioEngine.playMessage();
@@ -736,7 +750,10 @@
       if (remaining <= 5000 && remaining > 0 && Math.ceil(remaining / 1000) !== Math.ceil((remaining + 100) / 1000)) {
         AudioEngine.playTick();
       }
-      if (remaining <= 0) clearUITimer();
+      if (remaining <= 0) {
+        clearUITimer();
+        DrawCanvas.flushCurrentStroke();
+      }
     }, 100);
   }
 
@@ -853,6 +870,9 @@
     });
 
     DrawCanvas.onStroke((stroke) => state.socket.emit('draw', stroke));
+    DrawCanvas.onDrawStart((data) => state.socket.emit('draw-start', data));
+    DrawCanvas.onDrawPoints((data) => state.socket.emit('draw-points', data));
+    DrawCanvas.onDrawEnd((data) => state.socket.emit('draw-end', data));
 
     // Mute
     $('#btn-mute').onclick = () => {

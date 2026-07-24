@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════
-   CANVAS DRAWING ENGINE
+   CANVAS DRAWING ENGINE — Live streaming (skribbl.io style)
    ═══════════════════════════════════════════════════════════ */
 
 const DrawCanvas = (() => {
@@ -13,11 +13,21 @@ const DrawCanvas = (() => {
   let myStrokes = [];
   let allStrokes = [];
   let currentStroke = null;
-  let onStrokeCallback = null;
   let devicePixelRatio = 1;
   const LOGICAL_W = 800;
   const LOGICAL_H = 500;
   const MIN_POINT_DIST = 2;
+
+  let liveStreaming = true;
+  let activeRemoteStroke = null;
+  let pointBuffer = [];
+  let pointBufferTimer = null;
+  const POINT_BUFFER_INTERVAL = 30;
+
+  let onDrawStartCallback = null;
+  let onDrawPointsCallback = null;
+  let onDrawEndCallback = null;
+  let onStrokeCallback = null;
 
   const COLORS = [
     '#000000', '#ffffff', '#ff4060', '#ff8c00', '#ffcc00', '#00e87b',
@@ -106,6 +116,8 @@ const DrawCanvas = (() => {
     return Math.sqrt(dx * dx + dy * dy);
   }
 
+  // ── Pointer handlers ──────────────────────────────────────
+
   function onPointerDown(e) {
     if (!drawingEnabled) return;
     e.preventDefault();
@@ -123,6 +135,19 @@ const DrawCanvas = (() => {
     ctx.arc(pt.x * LOGICAL_W, pt.y * LOGICAL_H, currentStroke.size / 2, 0, Math.PI * 2);
     ctx.fillStyle = currentStroke.color;
     ctx.fill();
+
+    if (liveStreaming && onDrawStartCallback) {
+      onDrawStartCallback({
+        id: currentStroke.id,
+        color: currentStroke.color,
+        size: currentStroke.size,
+        tool: currentStroke.tool,
+        point: pt,
+      });
+    }
+    pointBuffer = [];
+    if (pointBufferTimer) clearInterval(pointBufferTimer);
+    pointBufferTimer = setInterval(flushPointBuffer, POINT_BUFFER_INTERVAL);
   }
 
   function onPointerMove(e) {
@@ -132,12 +157,41 @@ const DrawCanvas = (() => {
     const lastPt = currentStroke.points[currentStroke.points.length - 1];
     if (lastPt && pointDist(lastPt, pt) < MIN_POINT_DIST) return;
     currentStroke.points.push(pt);
-    redrawLastStroke();
+    if (liveStreaming) {
+      pointBuffer.push(pt);
+    }
+    redrawCanvas();
   }
 
   function onPointerUp(e) {
+    flushCurrentStroke();
+  }
+
+  // ── Point buffering ───────────────────────────────────────
+
+  function flushPointBuffer() {
+    if (pointBuffer.length > 0 && onDrawPointsCallback && currentStroke) {
+      onDrawPointsCallback({ id: currentStroke.id, points: pointBuffer.slice() });
+      pointBuffer = [];
+    }
+  }
+
+  // ── Stroke finalization ───────────────────────────────────
+
+  function flushCurrentStroke() {
     if (!isDrawing || !currentStroke) return;
     isDrawing = false;
+
+    if (pointBufferTimer) {
+      clearInterval(pointBufferTimer);
+      pointBufferTimer = null;
+    }
+
+    if (liveStreaming) {
+      flushPointBuffer();
+      if (onDrawEndCallback) onDrawEndCallback({ id: currentStroke.id });
+    }
+
     if (currentStroke.points.length > 1) {
       myStrokes.push(currentStroke);
       allStrokes.push(currentStroke);
@@ -146,10 +200,21 @@ const DrawCanvas = (() => {
     currentStroke = null;
   }
 
-  function redrawLastStroke() {
+  function disableDrawing() {
+    flushCurrentStroke();
+    drawingEnabled = false;
+    canvas.style.cursor = 'default';
+  }
+
+  // ── Redraw ────────────────────────────────────────────────
+
+  function redrawCanvas() {
     drawAllStrokes(ctx, allStrokes);
     if (currentStroke && currentStroke.points.length > 1) {
       drawStroke(ctx, currentStroke);
+    }
+    if (activeRemoteStroke && activeRemoteStroke.points.length >= 1) {
+      drawStroke(ctx, activeRemoteStroke);
     }
   }
 
@@ -199,6 +264,75 @@ const DrawCanvas = (() => {
     drawAllStrokes(ctx, allStrokes);
     if (discCtx) drawAllStrokes(discCtx, allStrokes);
   }
+
+  // ── Remote stroke handlers (live streaming) ───────────────
+
+  function handleDrawStart(data) {
+    if (!data || !data.id || !data.point) return;
+    if (currentStroke && currentStroke.id === data.id) return;
+    if (activeRemoteStroke && activeRemoteStroke.id === data.id) return;
+    activeRemoteStroke = {
+      id: data.id,
+      points: [data.point],
+      color: data.color || '#000000',
+      size: data.size || 8,
+      tool: data.tool || 'pen',
+    };
+    redrawCanvas();
+  }
+
+  function handleDrawPoints(data) {
+    if (!activeRemoteStroke || !data || !data.id || !data.points) return;
+    if (activeRemoteStroke.id !== data.id) return;
+    for (const pt of data.points) {
+      if (pt && typeof pt.x === 'number' && typeof pt.y === 'number') {
+        if (pt.x >= 0 && pt.x <= 1 && pt.y >= 0 && pt.y <= 1) {
+          activeRemoteStroke.points.push(pt);
+        }
+      }
+    }
+    redrawCanvas();
+  }
+
+  function handleDrawEnd(data) {
+    if (!activeRemoteStroke) return;
+    if (data && data.id && activeRemoteStroke.id !== data.id) return;
+    if (activeRemoteStroke.points.length > 1) {
+      allStrokes.push(activeRemoteStroke);
+    }
+    activeRemoteStroke = null;
+    redraw();
+  }
+
+  function setLiveStreaming(enabled) {
+    liveStreaming = enabled;
+  }
+
+  // ── Complete stroke handlers (reveal mode / server storage) ──
+
+  function addRemoteStroke(stroke) {
+    if (!stroke || typeof stroke !== 'object') return;
+    if (!Array.isArray(stroke.points) || stroke.points.length === 0) return;
+    if (typeof stroke.color !== 'string' || typeof stroke.size !== 'number') return;
+    for (const pt of stroke.points) {
+      if (!pt || typeof pt.x !== 'number' || typeof pt.y !== 'number') return;
+    }
+    allStrokes.push(stroke);
+    drawStroke(ctx, stroke);
+  }
+
+  function revealTurnStrokes(strokes) {
+    const existingIds = new Set(allStrokes.map((s) => s.id));
+    strokes.forEach((s) => {
+      if (s && s.id && !existingIds.has(s.id)) {
+        allStrokes.push(s);
+        existingIds.add(s.id);
+      }
+    });
+    drawAllStrokes(ctx, allStrokes);
+  }
+
+  // ── Palette & tools ───────────────────────────────────────
 
   function buildPalette() {
     const palette = document.getElementById('palette');
@@ -254,45 +388,25 @@ const DrawCanvas = (() => {
     updateCursor();
   }
 
-  function disableDrawing() {
-    drawingEnabled = false;
-    isDrawing = false;
-    canvas.style.cursor = 'default';
-  }
-
-  function addRemoteStroke(stroke) {
-    if (!stroke || typeof stroke !== 'object') return;
-    if (!Array.isArray(stroke.points) || stroke.points.length === 0) return;
-    if (typeof stroke.color !== 'string' || typeof stroke.size !== 'number') return;
-    for (const pt of stroke.points) {
-      if (!pt || typeof pt.x !== 'number' || typeof pt.y !== 'number') return;
-    }
-    allStrokes.push(stroke);
-    drawStroke(ctx, stroke);
-  }
-
-  function revealTurnStrokes(strokes) {
-    const existingIds = new Set(allStrokes.map((s) => s.id));
-    strokes.forEach((s) => {
-      if (s && s.id && !existingIds.has(s.id)) {
-        allStrokes.push(s);
-        existingIds.add(s.id);
-      }
-    });
-    drawAllStrokes(ctx, allStrokes);
-  }
+  // ── Other ─────────────────────────────────────────────────
 
   function undoLastStroke() {
     if (myStrokes.length === 0) return;
     const removed = myStrokes.pop();
     const idx = allStrokes.indexOf(removed);
     if (idx !== -1) allStrokes.splice(idx, 1);
-    drawAllStrokes(ctx, allStrokes);
+    redrawCanvas();
   }
 
   function clearCanvas() {
     myStrokes = [];
     allStrokes = [];
+    activeRemoteStroke = null;
+    if (pointBufferTimer) {
+      clearInterval(pointBufferTimer);
+      pointBufferTimer = null;
+    }
+    pointBuffer = [];
     drawAllStrokes(ctx, allStrokes);
     if (discCtx) drawAllStrokes(discCtx, allStrokes);
   }
@@ -302,6 +416,9 @@ const DrawCanvas = (() => {
   }
 
   function onStroke(cb) { onStrokeCallback = cb; }
+  function onDrawStart(cb) { onDrawStartCallback = cb; }
+  function onDrawPoints(cb) { onDrawPointsCallback = cb; }
+  function onDrawEnd(cb) { onDrawEndCallback = cb; }
   function getStrokes() { return allStrokes; }
 
   return {
@@ -310,15 +427,23 @@ const DrawCanvas = (() => {
     resizeDiscCanvas,
     enableDrawing,
     disableDrawing,
+    flushCurrentStroke,
     setColor,
     setSize,
     setTool,
+    setLiveStreaming,
     addRemoteStroke,
+    handleDrawStart,
+    handleDrawPoints,
+    handleDrawEnd,
     revealTurnStrokes,
     undoLastStroke,
     clearCanvas,
     copyToDiscussion,
     onStroke,
+    onDrawStart,
+    onDrawPoints,
+    onDrawEnd,
     getStrokes,
     COLORS,
   };
