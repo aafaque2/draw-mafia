@@ -213,7 +213,9 @@ const GameEngine = {
     gs.turnOrder = shuffleArray(connected);
     gs.votes = {};
     gs.turnStrokes = [];
-    gs.canvasStrokes = [];
+    if (!(room.settings && room.settings.persistDrawings)) {
+      gs.canvasStrokes = [];
+    }
     gs.currentTurnIndex = 0;
     gs.currentPass = 1;
     gs.phase = 'role-reveal';
@@ -269,11 +271,17 @@ const GameEngine = {
 
     const drawingVisibility =
       (room.settings && room.settings.drawingVisibility) || 'live';
+    const persistDrawings = !!(room.settings && room.settings.persistDrawings);
 
     io.to(room.code).emit('phase-changed', {
       phase: 'drawing',
       drawingVisibility,
+      persistDrawings,
     });
+
+    if (persistDrawings && gs.canvasStrokes.length > 0) {
+      io.to(room.code).emit('canvas-strokes', gs.canvasStrokes);
+    }
 
     GameEngine.startTurn(io, room);
   },
@@ -281,6 +289,7 @@ const GameEngine = {
   startTurn(io, room) {
     const gs = room.gameState;
     clearGameTimer(gs);
+    gs.drawGrace = null;
 
     const imposterCount = (room.settings && room.settings.imposterCount) || 1;
     const connected = getConnectedPlayers(room);
@@ -327,10 +336,15 @@ const GameEngine = {
 
   handleDraw(io, room, playerId, strokeData) {
     const gs = room.gameState;
-    if (!gs || gs.phase !== 'drawing') return;
+    if (!gs) return;
 
     const currentPlayer = gs.turnOrder[gs.currentTurnIndex];
-    if (playerId !== currentPlayer) return;
+    const isCurrentTurn = gs.phase === 'drawing' && playerId === currentPlayer;
+
+    const grace = gs.drawGrace;
+    const isGraceTurn = grace && playerId === grace.playerId && Date.now() < grace.until;
+
+    if (!isCurrentTurn && !isGraceTurn) return;
 
     if (!strokeData || typeof strokeData !== 'object') return;
     const VALID_TOOLS = new Set(['pen', 'eraser']);
@@ -350,12 +364,70 @@ const GameEngine = {
       if (gs.canvasStrokes.length < 2000) {
         gs.canvasStrokes.push(strokeData);
       }
-      io.to(room.code).emit('stroke', strokeData);
     } else {
       if (gs.turnStrokes.length < 500) {
         gs.turnStrokes.push(strokeData);
       }
     }
+  },
+
+  handleDrawStart(io, room, playerId, data) {
+    const gs = room.gameState;
+    if (!gs) return;
+
+    const currentPlayer = gs.turnOrder[gs.currentTurnIndex];
+    const isCurrentTurn = gs.phase === 'drawing' && playerId === currentPlayer;
+    const grace = gs.drawGrace;
+    const isGraceTurn = grace && playerId === grace.playerId && Date.now() < grace.until;
+    if (!isCurrentTurn && !isGraceTurn) return;
+
+    if (!data || typeof data !== 'object') return;
+    if (!data.id || typeof data.id !== 'string') return;
+    if (!data.point || typeof data.point.x !== 'number' || typeof data.point.y !== 'number') return;
+    if (data.point.x < 0 || data.point.x > 1 || data.point.y < 0 || data.point.y > 1) return;
+    const VALID_TOOLS = new Set(['pen', 'eraser']);
+    if (!VALID_TOOLS.has(data.tool)) return;
+    if (typeof data.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(data.color)) return;
+    if (typeof data.size !== 'number' || data.size < 1 || data.size > 100) return;
+
+    io.to(room.code).emit('draw-start', data);
+  },
+
+  handleDrawPoints(io, room, playerId, data) {
+    const gs = room.gameState;
+    if (!gs) return;
+
+    const currentPlayer = gs.turnOrder[gs.currentTurnIndex];
+    const isCurrentTurn = gs.phase === 'drawing' && playerId === currentPlayer;
+    const grace = gs.drawGrace;
+    const isGraceTurn = grace && playerId === grace.playerId && Date.now() < grace.until;
+    if (!isCurrentTurn && !isGraceTurn) return;
+
+    if (!data || typeof data !== 'object') return;
+    if (!data.id || typeof data.id !== 'string') return;
+    if (!Array.isArray(data.points) || data.points.length === 0 || data.points.length > 100) return;
+    for (const pt of data.points) {
+      if (!pt || typeof pt.x !== 'number' || typeof pt.y !== 'number') return;
+      if (pt.x < 0 || pt.x > 1 || pt.y < 0 || pt.y > 1) return;
+    }
+
+    io.to(room.code).emit('draw-points', data);
+  },
+
+  handleDrawEnd(io, room, playerId, data) {
+    const gs = room.gameState;
+    if (!gs) return;
+
+    const currentPlayer = gs.turnOrder[gs.currentTurnIndex];
+    const isCurrentTurn = gs.phase === 'drawing' && playerId === currentPlayer;
+    const grace = gs.drawGrace;
+    const isGraceTurn = grace && playerId === grace.playerId && Date.now() < grace.until;
+    if (!isCurrentTurn && !isGraceTurn) return;
+
+    if (!data || typeof data !== 'object') return;
+    if (!data.id || typeof data.id !== 'string') return;
+
+    io.to(room.code).emit('draw-end', data);
   },
 
   handleDoneDrawing(io, room, playerId) {
@@ -384,6 +456,9 @@ const GameEngine = {
     }
 
     const currentPlayer = gs.turnOrder[gs.currentTurnIndex];
+
+    gs.drawGrace = { playerId: currentPlayer, until: Date.now() + 1000 };
+
     io.to(room.code).emit('turn-ended', { playerId: currentPlayer });
 
     gs.currentTurnIndex++;

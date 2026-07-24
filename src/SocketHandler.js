@@ -363,6 +363,48 @@ function setupSocket(io) {
       }
     });
 
+    // ---- draw-start (live streaming) ----
+    socket.on('draw-start', (data) => {
+      try {
+        if (isDrawRateLimited(socket.id)) return;
+        const roomInfo = RoomManager.getRoomBySocketId(socket.id);
+        if (!roomInfo) return;
+
+        const { room, playerId } = roomInfo;
+        GameEngine.handleDrawStart(io, room, playerId, data);
+      } catch (err) {
+        console.error('[draw-start]', err);
+      }
+    });
+
+    // ---- draw-points (live streaming) ----
+    socket.on('draw-points', (data) => {
+      try {
+        if (isDrawRateLimited(socket.id)) return;
+        const roomInfo = RoomManager.getRoomBySocketId(socket.id);
+        if (!roomInfo) return;
+
+        const { room, playerId } = roomInfo;
+        GameEngine.handleDrawPoints(io, room, playerId, data);
+      } catch (err) {
+        console.error('[draw-points]', err);
+      }
+    });
+
+    // ---- draw-end (live streaming) ----
+    socket.on('draw-end', (data) => {
+      try {
+        if (isDrawRateLimited(socket.id)) return;
+        const roomInfo = RoomManager.getRoomBySocketId(socket.id);
+        if (!roomInfo) return;
+
+        const { room, playerId } = roomInfo;
+        GameEngine.handleDrawEnd(io, room, playerId, data);
+      } catch (err) {
+        console.error('[draw-end]', err);
+      }
+    });
+
     // ---- done-drawing ----
     socket.on('done-drawing', () => {
       try {
