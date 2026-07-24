@@ -484,6 +484,16 @@ body {
   font-weight: 600;
   color: var(--primary);
 }
+.setting-checkbox-wrap {
+  display: flex;
+  align-items: center;
+}
+.setting-checkbox-wrap input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
 
 /* ── Chat Panel ───────────────────────────────────────────── */
 .chat-panel {

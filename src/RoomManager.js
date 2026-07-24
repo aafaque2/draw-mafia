@@ -15,6 +15,7 @@ const DEFAULT_SETTINGS = {
   totalRounds: 3,
   wordCategory: 'all',
   imposterCount: 1,
+  persistDrawings: false,
 };
 
 const SETTINGS_RANGES = {
@@ -149,6 +150,9 @@ function updateSettings(roomCode, playerId, newSettings) {
         if (!valid.includes(val)) continue;
         break;
       }
+      case 'persistDrawings':
+        val = val === true || val === 'true';
+        break;
       default:
         if (typeof val === 'number' && SETTINGS_RANGES[key]) {
           const r = SETTINGS_RANGES[key];

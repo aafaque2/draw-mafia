@@ -92,6 +92,7 @@ const UI = (() => {
       { key: 'drawingVisibility', label: 'Drawing Visibility', type: 'select', options: [
         { value: 'live', label: 'Live' }, { value: 'reveal', label: 'Reveal After Turn' },
       ]},
+      { key: 'persistDrawings', label: 'Persist Drawings Between Rounds', type: 'checkbox' },
       { key: 'discussionTime', label: 'Discussion (s)', type: 'range', min: 10, max: 180, step: 10 },
       { key: 'votingTime', label: 'Voting (s)', type: 'range', min: 15, max: 90, step: 5 },
       { key: 'totalRounds', label: 'Max Rounds', type: 'select', options: [
@@ -145,6 +146,19 @@ const UI = (() => {
         }
         item.appendChild(valSpan);
         item.appendChild(range);
+      } else if (d.type === 'checkbox') {
+        const wrap = el('div', 'setting-checkbox-wrap');
+        const checkbox = el('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = !!settings[d.key];
+        checkbox.disabled = !isHost;
+        if (isHost) {
+          checkbox.onchange = () => {
+            onchange({ [d.key]: checkbox.checked });
+          };
+        }
+        wrap.appendChild(checkbox);
+        item.appendChild(wrap);
       }
 
       container.appendChild(item);
