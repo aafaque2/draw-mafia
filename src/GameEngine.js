@@ -1,5 +1,6 @@
 const WordBank = require('./WordBank');
 const RoomManager = require('./RoomManager');
+const { TIMING, LIMITS } = require('./constants');
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,19 @@ function clearGameTimer(gameState) {
 function sanitizeMessage(msg) {
   if (typeof msg !== 'string') return '';
   return msg.replace(/<[^>]*>/g, '').replace(/[<>]/g, '').trim().slice(0, 200);
+}
+
+function emitSystemMessage(io, roomCode, message) {
+  io.to(roomCode).emit('chat-message', {
+    system: true,
+    message,
+    timestamp: Date.now(),
+  });
+}
+
+function playerName(room, playerId) {
+  const p = room.players.get(playerId);
+  return (p && p.name) || playerId;
 }
 
 // ─── Score calculation ──────────────────────────────────────────────────────
@@ -67,13 +81,11 @@ function calculateScores(room, result) {
     }
 
     case 'word-guessed': {
-      if (result.caughtImposters) {
-        result.caughtImposters.forEach((id) => {
-          if (roundScores[id] !== undefined) {
-            roundScores[id] += 200;
-          }
-        });
-      }
+      gs.imposters.forEach((id) => {
+        if (roundScores[id] !== undefined) {
+          roundScores[id] += 250;
+        }
+      });
       wrongVoters.forEach((id) => {
         if (roundScores[id] !== undefined) {
           roundScores[id] -= 50;
@@ -110,15 +122,6 @@ function calculateScores(room, result) {
       break;
     }
 
-    case 'word-guessed': {
-      gs.imposters.forEach((id) => {
-        if (roundScores[id] !== undefined) {
-          roundScores[id] += 250;
-        }
-      });
-      break;
-    }
-
     default:
       break;
   }
@@ -142,11 +145,21 @@ const GameEngine = {
 
     if (connected.length < imposterCount + 2) return { error: 'Not enough players' };
 
+    const nonHostConnected = connected.filter((id) => {
+      const p = room.players.get(id);
+      return p && !p.isHost;
+    });
+    const allReady = nonHostConnected.every((id) => room.ready.has(id));
+    if (nonHostConnected.length > 0 && !allReady) {
+      return { error: 'Not all players are ready' };
+    }
+
     room.state = 'playing';
 
     const wordBankSession = WordBank.createSession();
 
     const category = (room.settings && room.settings.wordCategory) || 'all';
+    gs.category = category;
     let word = null;
     let imposterWord = null;
     const mode = (room.settings && room.settings.mode) || 'classic';
@@ -188,9 +201,9 @@ const GameEngine = {
       wordBankSession,
     };
 
-    io.to(room.code).emit('game-started');
-
     GameEngine.startRound(io, room);
+
+    io.to(room.code).emit('game-started');
   },
 
   startRound(io, room) {
@@ -206,6 +219,7 @@ const GameEngine = {
     }
 
     gs.round++;
+    room.currentRound = gs.round;
 
     const impostersSet = new Set(gs.imposters);
     gs.artists = connected.filter((id) => !impostersSet.has(id));
@@ -230,11 +244,15 @@ const GameEngine = {
           io.to(player.socketId).emit('role-assigned', {
             role: 'artist',
             word: gs.imposterWord,
+            wordLength: gs.imposterWord ? gs.imposterWord.length : 0,
+            category: gs.category,
           });
         } else {
           io.to(player.socketId).emit('role-assigned', {
             role: 'artist',
             word: gs.word,
+            wordLength: gs.word ? gs.word.length : 0,
+            category: gs.category,
           });
         }
       } else {
@@ -242,11 +260,15 @@ const GameEngine = {
           io.to(player.socketId).emit('role-assigned', {
             role: 'imposter',
             word: null,
+            wordLength: gs.word ? gs.word.length : 0,
+            category: gs.category,
           });
         } else {
           io.to(player.socketId).emit('role-assigned', {
             role: 'artist',
             word: gs.word,
+            wordLength: gs.word ? gs.word.length : 0,
+            category: gs.category,
           });
         }
       }
@@ -258,9 +280,12 @@ const GameEngine = {
       phase: 'role-reveal',
     });
 
+    emitSystemMessage(io, room.code, 'Round ' + gs.round + ' of ' + gs.totalRounds + ' begins!');
+
     gs.timer = setTimeout(() => {
+      if (gs.phase !== 'role-reveal') return;
       GameEngine.startDrawingPhase(io, room);
-    }, 4000);
+    }, TIMING.ROLE_REVEAL_DURATION);
   },
 
   startDrawingPhase(io, room) {
@@ -330,6 +355,7 @@ const GameEngine = {
     });
 
     gs.timer = setTimeout(() => {
+      if (gs.phase !== 'drawing') return;
       GameEngine.endTurn(io, room);
     }, drawTime * 1000);
   },
@@ -349,7 +375,7 @@ const GameEngine = {
     if (!strokeData || typeof strokeData !== 'object') return;
     const VALID_TOOLS = new Set(['pen', 'eraser']);
     if (!VALID_TOOLS.has(strokeData.tool)) return;
-    if (!Array.isArray(strokeData.points) || strokeData.points.length === 0 || strokeData.points.length > 500) return;
+    if (!Array.isArray(strokeData.points) || strokeData.points.length === 0 || strokeData.points.length > LIMITS.STROKE_POINTS_MAX) return;
     if (typeof strokeData.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(strokeData.color)) return;
     if (typeof strokeData.size !== 'number' || strokeData.size < 1 || strokeData.size > 100) return;
     for (const pt of strokeData.points) {
@@ -361,11 +387,11 @@ const GameEngine = {
       (room.settings && room.settings.drawingVisibility) || 'live';
 
     if (drawingVisibility === 'live') {
-      if (gs.canvasStrokes.length < 2000) {
+      if (gs.canvasStrokes.length < LIMITS.CANVAS_STROKES_MAX) {
         gs.canvasStrokes.push(strokeData);
       }
     } else {
-      if (gs.turnStrokes.length < 500) {
+      if (gs.turnStrokes.length < LIMITS.TURN_STROKES_MAX) {
         gs.turnStrokes.push(strokeData);
       }
     }
@@ -405,7 +431,7 @@ const GameEngine = {
 
     if (!data || typeof data !== 'object') return;
     if (!data.id || typeof data.id !== 'string') return;
-    if (!Array.isArray(data.points) || data.points.length === 0 || data.points.length > 100) return;
+    if (!Array.isArray(data.points) || data.points.length === 0 || data.points.length > LIMITS.DRAW_POINTS_MAX) return;
     for (const pt of data.points) {
       if (!pt || typeof pt.x !== 'number' || typeof pt.y !== 'number') return;
       if (pt.x < 0 || pt.x > 1 || pt.y < 0 || pt.y > 1) return;
@@ -428,6 +454,27 @@ const GameEngine = {
     if (!data.id || typeof data.id !== 'string') return;
 
     io.to(room.code).emit('draw-end', data);
+  },
+
+  handleUndoStroke(io, room, playerId) {
+    const gs = room.gameState;
+    if (!gs || gs.phase !== 'drawing') return;
+
+    const currentPlayer = gs.turnOrder[gs.currentTurnIndex];
+    if (playerId !== currentPlayer) return;
+
+    const drawingVisibility =
+      (room.settings && room.settings.drawingVisibility) || 'live';
+
+    if (drawingVisibility === 'reveal') {
+      if (gs.turnStrokes.length === 0) return;
+      const removed = gs.turnStrokes.pop();
+      io.to(room.code).emit('stroke-undone', { strokeId: removed.id });
+    } else {
+      if (gs.canvasStrokes.length === 0) return;
+      const removed = gs.canvasStrokes.pop();
+      io.to(room.code).emit('stroke-undone', { strokeId: removed.id });
+    }
   },
 
   handleDoneDrawing(io, room, playerId) {
@@ -457,7 +504,7 @@ const GameEngine = {
 
     const currentPlayer = gs.turnOrder[gs.currentTurnIndex];
 
-    gs.drawGrace = { playerId: currentPlayer, until: Date.now() + 1000 };
+    gs.drawGrace = { playerId: currentPlayer, until: Date.now() + TIMING.DRAW_GRACE_PERIOD };
 
     io.to(room.code).emit('turn-ended', { playerId: currentPlayer });
 
@@ -497,6 +544,7 @@ const GameEngine = {
     });
 
     gs.timer = setTimeout(() => {
+      if (gs.phase !== 'discussion') return;
       GameEngine.startVotingPhase(io, room);
     }, discussionTime * 1000);
   },
@@ -510,6 +558,7 @@ const GameEngine = {
 
     const player = room.players.get(playerId);
     if (!player) return;
+    if (player.isConnected === false) return;
 
     io.to(room.code).emit('chat-message', {
       playerId,
@@ -539,6 +588,7 @@ const GameEngine = {
     });
 
     gs.timer = setTimeout(() => {
+      if (gs.phase !== 'voting') return;
       GameEngine.resolveVote(io, room);
     }, votingTime * 1000);
   },
@@ -601,6 +651,17 @@ const GameEngine = {
       wasImposter,
     });
 
+    if (accusedId) {
+      const accusedName = playerName(room, accusedId);
+      if (wasImposter) {
+        emitSystemMessage(io, room.code, accusedName + ' was the imposter! They have been caught.');
+      } else {
+        emitSystemMessage(io, room.code, accusedName + ' was voted out — they were an artist!');
+      }
+    } else {
+      emitSystemMessage(io, room.code, 'No one was voted out this round.');
+    }
+
     if (accusedId && wasImposter) {
       if (gs.mode === 'classic') {
         GameEngine.startWordGuess(io, room, accusedId);
@@ -612,7 +673,13 @@ const GameEngine = {
       }
     } else if (accusedId && !wasImposter) {
       const p = room.players.get(accusedId);
-      if (p) p.isConnected = false;
+      if (p) {
+        p.isConnected = false;
+        io.to(p.socketId).emit('ejected', {
+          reason: 'You were voted out by the other players.',
+          canObserver: true,
+        });
+      }
 
       const remaining = getConnectedPlayers(room).length;
       const imposterCount = (room.settings && room.settings.imposterCount) || 1;
@@ -645,12 +712,13 @@ const GameEngine = {
     });
 
     gs.timer = setTimeout(() => {
+      if (gs.phase !== 'word-guess') return;
       GameEngine.endRound(io, room, {
         result: 'caught',
         caughtImposters: [imposterId],
         wordGuessed: false,
       });
-    }, 15000);
+    }, TIMING.WORD_GUESS_DURATION);
   },
 
   handleWordGuess(io, room, playerId, guess) {
@@ -689,13 +757,9 @@ const GameEngine = {
     const normalizedGuess = (guess || '').trim().toLowerCase();
     const normalizedWord = (gs.word || '').trim().toLowerCase();
 
-    const player = room.players.get(playerId);
-
     if (normalizedGuess === normalizedWord) {
       clearGameTimer(gs);
       io.to(room.code).emit('snipe-result', {
-        playerId,
-        playerName: (player && player.name) || playerId,
         correct: true,
       });
       GameEngine.endRound(io, room, {
@@ -704,8 +768,6 @@ const GameEngine = {
       });
     } else {
       io.to(room.code).emit('snipe-result', {
-        playerId,
-        playerName: (player && player.name) || playerId,
         correct: false,
       });
     }
@@ -727,27 +789,41 @@ const GameEngine = {
       result.result === 'imposter-disconnected' ||
       gs.round >= gs.totalRounds;
 
+    const resultLabel = {
+      'caught': 'Artists caught the imposter!',
+      'word-guessed': 'The imposter guessed the word!',
+      'survived': 'The imposter survived the vote!',
+      'wrong-vote': 'An artist was wrongly voted out!',
+      'imposter-disconnected': 'The imposter disconnected!',
+    }[result.result] || 'Round over!';
+    emitSystemMessage(io, room.code, resultLabel);
+
     io.to(room.code).emit('round-results', {
       result: result.result,
       word: gs.word,
       imposterWord: gs.imposterWord,
       imposters: gs.imposters,
+      votes: gs.votes ? { ...gs.votes } : {},
       scores: { ...gs.scores },
       roundScores,
       round: gs.round,
       totalRounds: gs.totalRounds,
       ejectedId: result.ejectedId || null,
+      wordGuessed: result.wordGuessed === true,
       gameOver,
+      transitionDelay: TIMING.ROUND_TRANSITION / 1000,
     });
 
     if (gameOver) {
       gs.timer = setTimeout(() => {
+        if (gs.phase !== 'results') return;
         GameEngine.endGame(io, room);
-      }, 5000);
+      }, TIMING.ROUND_TRANSITION);
     } else {
       gs.timer = setTimeout(() => {
+        if (gs.phase !== 'results') return;
         GameEngine.startRound(io, room);
-      }, 5000);
+      }, TIMING.ROUND_TRANSITION);
     }
   },
 
@@ -757,6 +833,11 @@ const GameEngine = {
 
     room.state = 'lobby';
     room.currentRound = 0;
+    room.ready.clear();
+
+    room.players.forEach((p) => {
+      p.isConnected = true;
+    });
 
     Object.keys(gs.scores).forEach((id) => {
       const p = room.players.get(id);
@@ -790,6 +871,7 @@ const GameEngine = {
       phase: 'game-over',
       playAgain: new Set(),
       playAgainTimer: null,
+      playAgainTimerStart: null,
     };
 
     io.to(room.code).emit('game-over', { finalScores, leaderboard });
@@ -802,19 +884,29 @@ const GameEngine = {
 
     gs.playAgain.add(playerId);
 
-    io.to(room.code).emit('play-again-updated', {
-      playAgainPlayers: Array.from(gs.playAgain),
-    });
-
     const totalPlayers = room.players.size;
     const allClicked = gs.playAgain.size >= totalPlayers;
 
-    if (allClicked) {
-      GameEngine.finishPlayAgain(io, room);
-    } else if (gs.playAgain.size === 1) {
+    if (gs.playAgainTimer) {
+      clearTimeout(gs.playAgainTimer);
+      gs.playAgainTimer = null;
+    }
+    let timerDeadline = null;
+    if (!allClicked) {
+      gs.playAgainTimerStart = Date.now();
       gs.playAgainTimer = setTimeout(() => {
         GameEngine.finishPlayAgain(io, room);
-      }, 30000);
+      }, TIMING.PLAY_AGAIN_WAIT);
+      timerDeadline = Date.now() + TIMING.PLAY_AGAIN_WAIT;
+    }
+
+    io.to(room.code).emit('play-again-updated', {
+      playAgainPlayers: Array.from(gs.playAgain),
+      timerDeadline,
+    });
+
+    if (allClicked) {
+      GameEngine.finishPlayAgain(io, room);
     }
   },
 
@@ -826,6 +918,7 @@ const GameEngine = {
       clearTimeout(gs.playAgainTimer);
       gs.playAgainTimer = null;
     }
+    gs.playAgainTimerStart = null;
 
     const toRemove = [];
     room.players.forEach((p, id) => {
@@ -835,6 +928,7 @@ const GameEngine = {
     });
 
     room.gameState = null;
+    room.ready.clear();
 
     toRemove.forEach((id) => {
       const p = room.players.get(id);

@@ -12,6 +12,7 @@ const DrawCanvas = (() => {
   let currentTool = 'pen';
   let myStrokes = [];
   let allStrokes = [];
+  const MAX_STROKES = 2000;
   let currentStroke = null;
   let devicePixelRatio = 1;
   const LOGICAL_W = 800;
@@ -35,11 +36,11 @@ const DrawCanvas = (() => {
     '#808080',
   ];
 
-  function init(canvasEl, discCanvasEl) {
+  function init(canvasEl) {
     canvas = canvasEl;
     ctx = canvas.getContext('2d');
-    discCanvas = discCanvasEl;
-    discCtx = discCanvas ? discCanvas.getContext('2d') : null;
+    discCanvas = null;
+    discCtx = null;
     devicePixelRatio = window.devicePixelRatio || 1;
     resize();
     window.addEventListener('resize', resize);
@@ -55,9 +56,6 @@ const DrawCanvas = (() => {
   }
 
   function resizeDiscCanvas() {
-    if (!discCanvas || !discCtx) return;
-    fitCanvas(discCanvas, discCtx);
-    drawAllStrokes(discCtx, allStrokes);
   }
 
   function fitCanvas(c, cCtx) {
@@ -194,7 +192,7 @@ const DrawCanvas = (() => {
 
     if (currentStroke.points.length > 1) {
       myStrokes.push(currentStroke);
-      allStrokes.push(currentStroke);
+      if (allStrokes.length < MAX_STROKES) allStrokes.push(currentStroke);
       if (onStrokeCallback) onStrokeCallback(currentStroke);
     }
     currentStroke = null;
@@ -298,7 +296,7 @@ const DrawCanvas = (() => {
     if (!activeRemoteStroke) return;
     if (data && data.id && activeRemoteStroke.id !== data.id) return;
     if (activeRemoteStroke.points.length > 1) {
-      allStrokes.push(activeRemoteStroke);
+      if (allStrokes.length < MAX_STROKES) allStrokes.push(activeRemoteStroke);
     }
     activeRemoteStroke = null;
     redraw();
@@ -317,14 +315,14 @@ const DrawCanvas = (() => {
     for (const pt of stroke.points) {
       if (!pt || typeof pt.x !== 'number' || typeof pt.y !== 'number') return;
     }
-    allStrokes.push(stroke);
+    if (allStrokes.length < MAX_STROKES) allStrokes.push(stroke);
     drawStroke(ctx, stroke);
   }
 
   function revealTurnStrokes(strokes) {
     const existingIds = new Set(allStrokes.map((s) => s.id));
     strokes.forEach((s) => {
-      if (s && s.id && !existingIds.has(s.id)) {
+      if (s && s.id && !existingIds.has(s.id) && allStrokes.length < MAX_STROKES) {
         allStrokes.push(s);
         existingIds.add(s.id);
       }
@@ -360,10 +358,16 @@ const DrawCanvas = (() => {
     if (eraserBtn) eraserBtn.classList.toggle('active', currentTool === 'eraser');
   }
 
+  function isTouchDevice() {
+    return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  }
+
   function updateCursor() {
     if (!canvas) return;
-    const size = currentTool === 'eraser' ? currentSize * 3 : currentSize;
-    const color = currentTool === 'eraser' ? '#ffffff' : currentColor;
+    if (isTouchDevice()) return;
+    const isEraser = currentTool === 'eraser';
+    const size = isEraser ? currentSize * 3 : currentSize;
+    const color = isEraser ? '#ffffff' : currentColor;
     const cursorSize = Math.max(size + 4, 16);
     const half = cursorSize / 2;
 
@@ -372,13 +376,21 @@ const DrawCanvas = (() => {
     off.height = cursorSize;
     const octx = off.getContext('2d');
 
-    octx.beginPath();
-    octx.arc(half, half, size / 2, 0, Math.PI * 2);
-    octx.fillStyle = color;
-    octx.fill();
-    octx.lineWidth = 2;
-    octx.strokeStyle = color === '#000000' ? '#ffffff' : '#000000';
-    octx.stroke();
+    if (isEraser) {
+      octx.fillStyle = 'rgba(255,255,255,0.7)';
+      octx.fillRect(1, 1, cursorSize - 2, cursorSize - 2);
+      octx.strokeStyle = '#888';
+      octx.lineWidth = 1.5;
+      octx.strokeRect(1, 1, cursorSize - 2, cursorSize - 2);
+    } else {
+      octx.beginPath();
+      octx.arc(half, half, size / 2, 0, Math.PI * 2);
+      octx.fillStyle = color;
+      octx.fill();
+      octx.lineWidth = 2;
+      octx.strokeStyle = color === '#000000' ? '#ffffff' : '#000000';
+      octx.stroke();
+    }
 
     canvas.style.cursor = 'url(' + off.toDataURL() + ') ' + half + ' ' + half + ', crosshair';
   }
@@ -398,6 +410,17 @@ const DrawCanvas = (() => {
     redrawCanvas();
   }
 
+  function handleStrokeUndone(data) {
+    if (!data || !data.strokeId) return;
+    const idx = allStrokes.findIndex((s) => s && s.id === data.strokeId);
+    if (idx !== -1) {
+      allStrokes.splice(idx, 1);
+      const myIdx = myStrokes.findIndex((s) => s && s.id === data.strokeId);
+      if (myIdx !== -1) myStrokes.splice(myIdx, 1);
+      redrawCanvas();
+    }
+  }
+
   function clearCanvas() {
     myStrokes = [];
     allStrokes = [];
@@ -412,7 +435,6 @@ const DrawCanvas = (() => {
   }
 
   function copyToDiscussion() {
-    if (discCtx) drawAllStrokes(discCtx, allStrokes);
   }
 
   function onStroke(cb) { onStrokeCallback = cb; }
@@ -436,6 +458,7 @@ const DrawCanvas = (() => {
     handleDrawStart,
     handleDrawPoints,
     handleDrawEnd,
+    handleStrokeUndone,
     revealTurnStrokes,
     undoLastStroke,
     clearCanvas,

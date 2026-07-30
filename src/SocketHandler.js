@@ -1,17 +1,34 @@
 const RoomManager = require('./RoomManager');
 const GameEngine = require('./GameEngine');
+const { LIMITS, RATE_LIMIT } = require('./constants');
 
-// --- Helper ---
+/**
+ * Send a structured error to a socket and log it.
+ * @param {import('socket.io').Socket} socket
+ * @param {string} code
+ * @param {string} message
+ */
+function emitError(socket, code, message) {
+  console.warn('[error] ' + code + ': ' + message + ' (socket ' + socket.id + ')');
+  socket.emit('error', { code, message });
+}
 
-/** Max strokes per socket per second for draw events */
-const DRAW_RATE_LIMIT_WINDOW_MS = 1000;
-const DRAW_RATE_LIMIT_MAX = 60;
-const drawTimestamps = new Map();
-
-/** Max rooms a single socket can create per minute */
-const CREATE_RATE_LIMIT_WINDOW_MS = 60000;
-const CREATE_RATE_LIMIT_MAX = 5;
-const createTimestamps = new Map();
+/**
+ * Wrap a socket event handler with try/catch.
+ * @param {import('socket.io').Socket} socket
+ * @param {string} eventName
+ * @param {Function} handler
+ */
+function wrapHandler(socket, eventName, handler) {
+  return (...args) => {
+    try {
+      handler(...args);
+    } catch (err) {
+      console.error('[' + eventName + ']', err);
+      socket.emit('error', { code: 'INTERNAL', message: 'An internal error occurred' });
+    }
+  };
+}
 
 /**
  * Strip HTML tags, trim, and truncate.
@@ -19,94 +36,41 @@ const createTimestamps = new Map();
  * @param {number} maxLength
  * @returns {string}
  */
-function sanitizeString(str, maxLength = 200) {
+function sanitizeString(str, maxLength) {
   if (typeof str !== 'string') return '';
-  return str.replace(/<[^>]*>/g, '').trim().slice(0, maxLength);
+  return str.replace(/<[^>]*>/g, '').trim().slice(0, maxLength || LIMITS.CHAT_MESSAGE_MAX);
 }
 
 // --- Rate Limiter (sliding-window per socket) ---
 
-/** @type {Map<string, number[]>} socketId → array of timestamps */
-const chatTimestamps = new Map();
+const rateLimitStores = [];
 
-const RATE_LIMIT_WINDOW_MS = 1000; // 1 second
-const RATE_LIMIT_MAX = 3;          // max messages per window
-
-/**
- * Returns true if the socket has exceeded the chat rate limit.
- * @param {string} socketId
- * @returns {boolean}
- */
-function isRateLimited(socketId) {
-  const now = Date.now();
-  let timestamps = chatTimestamps.get(socketId);
-
-  if (!timestamps) {
-    timestamps = [];
-    chatTimestamps.set(socketId, timestamps);
-  }
-
-  // Purge timestamps outside the window
-  while (timestamps.length > 0 && timestamps[0] <= now - RATE_LIMIT_WINDOW_MS) {
-    timestamps.shift();
-  }
-
-  if (timestamps.length >= RATE_LIMIT_MAX) {
-    return true;
-  }
-
-  timestamps.push(now);
-  return false;
+function makeRateLimiter(windowMs, maxHits) {
+  const store = new Map();
+  rateLimitStores.push(store);
+  return function isLimited(socketId) {
+    const now = Date.now();
+    let timestamps = store.get(socketId);
+    if (!timestamps) {
+      timestamps = [];
+      store.set(socketId, timestamps);
+    }
+    while (timestamps.length > 0 && timestamps[0] <= now - windowMs) {
+      timestamps.shift();
+    }
+    if (timestamps.length >= maxHits) return true;
+    timestamps.push(now);
+    return false;
+  };
 }
 
-/**
- * Returns true if the socket has exceeded the draw rate limit.
- * @param {string} socketId
- * @returns {boolean}
- */
-function isDrawRateLimited(socketId) {
-  const now = Date.now();
-  let timestamps = drawTimestamps.get(socketId);
-  if (!timestamps) {
-    timestamps = [];
-    drawTimestamps.set(socketId, timestamps);
-  }
-  while (timestamps.length > 0 && timestamps[0] <= now - DRAW_RATE_LIMIT_WINDOW_MS) {
-    timestamps.shift();
-  }
-  if (timestamps.length >= DRAW_RATE_LIMIT_MAX) return true;
-  timestamps.push(now);
-  return false;
-}
+const isChatRateLimited = makeRateLimiter(RATE_LIMIT.CHAT_WINDOW_MS, RATE_LIMIT.CHAT_MAX);
+const isDrawRateLimited = makeRateLimiter(RATE_LIMIT.DRAW_WINDOW_MS, RATE_LIMIT.DRAW_MAX);
+const isVoteRateLimited = makeRateLimiter(RATE_LIMIT.VOTE_WINDOW_MS, RATE_LIMIT.VOTE_MAX);
+const isCreateRateLimited = makeRateLimiter(RATE_LIMIT.CREATE_ROOM_WINDOW_MS, RATE_LIMIT.CREATE_ROOM_MAX);
 
-/**
- * Returns true if the socket has exceeded the create-room rate limit.
- * @param {string} socketId
- * @returns {boolean}
- */
-function isCreateRateLimited(socketId) {
-  const now = Date.now();
-  let timestamps = createTimestamps.get(socketId);
-  if (!timestamps) {
-    timestamps = [];
-    createTimestamps.set(socketId, timestamps);
-  }
-  while (timestamps.length > 0 && timestamps[0] <= now - CREATE_RATE_LIMIT_WINDOW_MS) {
-    timestamps.shift();
-  }
-  if (timestamps.length >= CREATE_RATE_LIMIT_MAX) return true;
-  timestamps.push(now);
-  return false;
-}
-
-/**
- * Remove rate-limit tracking data for a disconnected socket.
- * @param {string} socketId
- */
 function clearRateLimitData(socketId) {
-  chatTimestamps.delete(socketId);
-  drawTimestamps.delete(socketId);
-  createTimestamps.delete(socketId);
+  rateLimitStores.forEach((store) => store.delete(socketId));
 }
 
 // --- Socket Setup ---
@@ -122,27 +86,28 @@ function setupSocket(io) {
     socket.on('create-room', (data) => {
       try {
         if (isCreateRateLimited(socket.id)) {
-          socket.emit('error', { message: 'Too many rooms created. Wait a moment.' });
+          emitError(socket, 'RATE_LIMIT', 'Too many rooms created. Wait a moment.');
           return;
         }
 
-        const playerName = sanitizeString(data && data.playerName, 20);
+        const playerName = sanitizeString(data && data.playerName, LIMITS.PLAYER_NAME_MAX);
         if (!playerName) {
-          socket.emit('error', { message: 'Player name is required' });
+          emitError(socket, 'VALIDATION', 'Player name is required');
           return;
         }
 
-        const { roomCode, playerId, room } = RoomManager.createRoom(socket.id, playerName);
+        const { roomCode, playerId, reconnectToken, room } = RoomManager.createRoom(socket.id, playerName);
 
         socket.join(roomCode);
         socket.emit('room-created', {
           roomCode,
           playerId,
+          reconnectToken,
           room: RoomManager.getSanitizedRoom(roomCode),
         });
       } catch (err) {
         console.error('[create-room]', err);
-        socket.emit('error', { message: 'An error occurred' });
+        emitError(socket, 'INTERNAL', 'An internal error occurred');
       }
     });
 
@@ -150,36 +115,37 @@ function setupSocket(io) {
     socket.on('join-room', (data) => {
       try {
         let roomCode = data && data.roomCode;
-        const playerName = sanitizeString(data && data.playerName, 20);
+        const playerName = sanitizeString(data && data.playerName, LIMITS.PLAYER_NAME_MAX);
 
         if (!roomCode || typeof roomCode !== 'string') {
-          socket.emit('error', { message: 'Room code is required' });
+          emitError(socket, 'VALIDATION', 'Room code is required');
           return;
         }
         if (!playerName) {
-          socket.emit('error', { message: 'Player name is required' });
+          emitError(socket, 'VALIDATION', 'Player name is required');
           return;
         }
 
-        roomCode = roomCode.trim().toUpperCase();
-        if (!/^[A-Z0-9]{1,10}$/.test(roomCode)) {
-          socket.emit('error', { message: 'Invalid room code format' });
+        roomCode = roomCode.trim();
+        if (!/^\d{6}$/.test(roomCode)) {
+          emitError(socket, 'VALIDATION', 'Room code must be 6 digits');
           return;
         }
 
         const result = RoomManager.joinRoom(roomCode, socket.id, playerName);
 
         if (result.error) {
-          socket.emit('error', { message: result.error });
+          emitError(socket, 'ROOM', result.error);
           return;
         }
 
-        const { playerId, player } = result;
+        const { playerId, reconnectToken, player } = result;
 
         socket.join(roomCode);
         socket.emit('room-joined', {
           roomCode,
           playerId,
+          reconnectToken,
           room: RoomManager.getSanitizedRoom(roomCode),
         });
 
@@ -198,7 +164,7 @@ function setupSocket(io) {
         });
       } catch (err) {
         console.error('[join-room]', err);
-        socket.emit('error', { message: 'An error occurred' });
+        emitError(socket, 'INTERNAL', 'An internal error occurred');
       }
     });
 
@@ -230,7 +196,54 @@ function setupSocket(io) {
         });
       } catch (err) {
         console.error('[leave-room]', err);
-        socket.emit('error', { message: 'An error occurred' });
+        emitError(socket, 'INTERNAL', 'An internal error occurred');
+      }
+    });
+
+    // ---- reconnect ----
+    socket.on('reconnect-game', (data) => {
+      try {
+        const reconnectToken = data && data.reconnectToken;
+        if (!reconnectToken) {
+          emitError(socket, 'VALIDATION', 'Reconnect token required');
+          return;
+        }
+
+        const result = RoomManager.reconnectPlayer(socket.id, reconnectToken);
+        if (result.error) {
+          emitError(socket, 'RECONNECT', result.error);
+          return;
+        }
+
+        const { roomCode, room, playerId, player } = result;
+
+        socket.join(roomCode);
+
+        socket.emit('reconnected', {
+          playerId,
+          reconnectToken,
+          room: RoomManager.getSanitizedRoom(roomCode),
+          gameState: room.gameState ? {
+            phase: room.gameState.phase,
+            round: room.gameState.round,
+            totalRounds: room.gameState.totalRounds,
+            word: room.gameState.word,
+            imposterWord: room.gameState.imposterWord,
+            roles: room.gameState.roles,
+            imposters: room.gameState.imposters,
+            scores: { ...room.gameState.scores },
+            mode: room.gameState.mode,
+          } : null,
+          currentPhase: room.gameState ? room.gameState.phase : null,
+        });
+
+        io.to(roomCode).emit('player-reconnected', { playerId });
+        io.to(roomCode).emit('room-updated', {
+          room: RoomManager.getSanitizedRoom(roomCode),
+        });
+      } catch (err) {
+        console.error('[reconnect]', err);
+        emitError(socket, 'INTERNAL', 'An internal error occurred');
       }
     });
 
@@ -239,7 +252,7 @@ function setupSocket(io) {
       try {
         const roomInfo = RoomManager.getRoomBySocketId(socket.id);
         if (!roomInfo) {
-          socket.emit('error', { message: 'Room not found' });
+          emitError(socket, 'ROOM', 'Room not found');
           return;
         }
 
@@ -248,7 +261,7 @@ function setupSocket(io) {
         // Only the host may update settings
         const player = room.players.get(playerId);
         if (!player || !player.isHost) {
-          socket.emit('error', { message: 'Only the host can update settings' });
+          emitError(socket, 'AUTH', 'Only the host can update settings');
           return;
         }
 
@@ -256,7 +269,7 @@ function setupSocket(io) {
         const result = RoomManager.updateSettings(roomCode, playerId, settings);
 
         if (result.error) {
-          socket.emit('error', { message: result.error });
+          emitError(socket, 'ROOM', result.error);
           return;
         }
 
@@ -265,7 +278,7 @@ function setupSocket(io) {
         });
       } catch (err) {
         console.error('[update-settings]', err);
-        socket.emit('error', { message: 'An error occurred' });
+        emitError(socket, 'INTERNAL', 'An internal error occurred');
       }
     });
 
@@ -274,7 +287,7 @@ function setupSocket(io) {
       try {
         const roomInfo = RoomManager.getRoomBySocketId(socket.id);
         if (!roomInfo) {
-          socket.emit('error', { message: 'Room not found' });
+          emitError(socket, 'ROOM', 'Room not found');
           return;
         }
 
@@ -283,20 +296,20 @@ function setupSocket(io) {
         // Only the host may kick
         const player = room.players.get(playerId);
         if (!player || !player.isHost) {
-          socket.emit('error', { message: 'Only the host can kick players' });
+          emitError(socket, 'AUTH', 'Only the host can kick players');
           return;
         }
 
         const targetId = data && data.targetId;
         if (!targetId) {
-          socket.emit('error', { message: 'Target player ID is required' });
+          emitError(socket, 'VALIDATION', 'Target player ID is required');
           return;
         }
 
         const result = RoomManager.kickPlayer(roomCode, playerId, targetId);
 
         if (result.error) {
-          socket.emit('error', { message: result.error });
+          emitError(socket, 'ROOM', result.error);
           return;
         }
 
@@ -317,7 +330,26 @@ function setupSocket(io) {
         });
       } catch (err) {
         console.error('[kick-player]', err);
-        socket.emit('error', { message: 'An error occurred' });
+        emitError(socket, 'INTERNAL', 'An internal error occurred');
+      }
+    });
+
+    // ---- toggle-ready ----
+    socket.on('toggle-ready', () => {
+      try {
+        const roomInfo = RoomManager.getRoomBySocketId(socket.id);
+        if (!roomInfo) return;
+
+        const { roomCode, playerId } = roomInfo;
+        const changed = RoomManager.toggleReady(roomCode, playerId);
+
+        if (changed) {
+          io.to(roomCode).emit('room-updated', {
+            room: RoomManager.getSanitizedRoom(roomCode),
+          });
+        }
+      } catch (err) {
+        console.error('[toggle-ready]', err);
       }
     });
 
@@ -326,7 +358,7 @@ function setupSocket(io) {
       try {
         const roomInfo = RoomManager.getRoomBySocketId(socket.id);
         if (!roomInfo) {
-          socket.emit('error', { message: 'Room not found' });
+          emitError(socket, 'ROOM', 'Room not found');
           return;
         }
 
@@ -334,18 +366,18 @@ function setupSocket(io) {
 
         const player = room.players.get(playerId);
         if (!player || !player.isHost) {
-          socket.emit('error', { message: 'Only the host can start the game' });
+          emitError(socket, 'AUTH', 'Only the host can start the game');
           return;
         }
 
         const result = GameEngine.startGame(io, room);
 
         if (result && result.error) {
-          socket.emit('error', { message: result.error });
+          emitError(socket, 'ROOM', result.error);
         }
       } catch (err) {
         console.error('[start-game]', err);
-        socket.emit('error', { message: 'An error occurred' });
+        emitError(socket, 'INTERNAL', 'An internal error occurred');
       }
     });
 
@@ -405,6 +437,19 @@ function setupSocket(io) {
       }
     });
 
+    // ---- undo-stroke ----
+    socket.on('undo-stroke', () => {
+      try {
+        const roomInfo = RoomManager.getRoomBySocketId(socket.id);
+        if (!roomInfo) return;
+
+        const { room, playerId } = roomInfo;
+        GameEngine.handleUndoStroke(io, room, playerId);
+      } catch (err) {
+        console.error('[undo-stroke]', err);
+      }
+    });
+
     // ---- done-drawing ----
     socket.on('done-drawing', () => {
       try {
@@ -415,7 +460,7 @@ function setupSocket(io) {
         GameEngine.handleDoneDrawing(io, room, playerId);
       } catch (err) {
         console.error('[done-drawing]', err);
-        socket.emit('error', { message: 'An error occurred' });
+        emitError(socket, 'INTERNAL', 'An internal error occurred');
       }
     });
 
@@ -423,20 +468,20 @@ function setupSocket(io) {
     socket.on('chat-message', (data) => {
       try {
         // Rate limit check
-        if (isRateLimited(socket.id)) {
-          socket.emit('error', { message: 'Rate limit exceeded' });
+        if (isChatRateLimited(socket.id)) {
+          emitError(socket, 'RATE_LIMIT', 'Rate limit exceeded');
           return;
         }
 
         const roomInfo = RoomManager.getRoomBySocketId(socket.id);
         if (!roomInfo) {
-          socket.emit('error', { message: 'Room not found' });
+          emitError(socket, 'ROOM', 'Room not found');
           return;
         }
 
         const { roomCode, playerId, room } = roomInfo;
         const rawMessage = data && data.message;
-        const message = sanitizeString(rawMessage, 200);
+        const message = sanitizeString(rawMessage, LIMITS.CHAT_MESSAGE_MAX);
 
         if (!message) return;
 
@@ -456,16 +501,18 @@ function setupSocket(io) {
         }
       } catch (err) {
         console.error('[chat-message]', err);
-        socket.emit('error', { message: 'An error occurred' });
+        emitError(socket, 'INTERNAL', 'An internal error occurred');
       }
     });
 
     // ---- cast-vote ----
     socket.on('cast-vote', (data) => {
       try {
+        if (isVoteRateLimited(socket.id)) return;
+
         const roomInfo = RoomManager.getRoomBySocketId(socket.id);
         if (!roomInfo) {
-          socket.emit('error', { message: 'Room not found' });
+          emitError(socket, 'ROOM', 'Room not found');
           return;
         }
 
@@ -475,7 +522,7 @@ function setupSocket(io) {
         GameEngine.handleVote(io, room, playerId, targetId);
       } catch (err) {
         console.error('[cast-vote]', err);
-        socket.emit('error', { message: 'An error occurred' });
+        emitError(socket, 'INTERNAL', 'An internal error occurred');
       }
     });
 
@@ -484,17 +531,17 @@ function setupSocket(io) {
       try {
         const roomInfo = RoomManager.getRoomBySocketId(socket.id);
         if (!roomInfo) {
-          socket.emit('error', { message: 'Room not found' });
+          emitError(socket, 'ROOM', 'Room not found');
           return;
         }
 
         const { room, playerId } = roomInfo;
-        const guess = sanitizeString(data && data.guess, 50);
+        const guess = sanitizeString(data && data.guess, LIMITS.GUESS_MAX);
 
         GameEngine.handleWordGuess(io, room, playerId, guess);
       } catch (err) {
         console.error('[guess-word]', err);
-        socket.emit('error', { message: 'An error occurred' });
+        emitError(socket, 'INTERNAL', 'An internal error occurred');
       }
     });
 
@@ -503,17 +550,17 @@ function setupSocket(io) {
       try {
         const roomInfo = RoomManager.getRoomBySocketId(socket.id);
         if (!roomInfo) {
-          socket.emit('error', { message: 'Room not found' });
+          emitError(socket, 'ROOM', 'Room not found');
           return;
         }
 
         const { room, playerId } = roomInfo;
-        const guess = sanitizeString(data && data.guess, 50);
+        const guess = sanitizeString(data && data.guess, LIMITS.GUESS_MAX);
 
         GameEngine.handleSnipe(io, room, playerId, guess);
       } catch (err) {
         console.error('[snipe]', err);
-        socket.emit('error', { message: 'An error occurred' });
+        emitError(socket, 'INTERNAL', 'An internal error occurred');
       }
     });
 
@@ -530,7 +577,7 @@ function setupSocket(io) {
         GameEngine.handlePlayAgain(io, room, playerId);
       } catch (err) {
         console.error('[play-again]', err);
-        socket.emit('error', { message: 'An error occurred' });
+        emitError(socket, 'INTERNAL', 'An internal error occurred');
       }
     });
 
@@ -539,109 +586,54 @@ function setupSocket(io) {
       try {
         clearRateLimitData(socket.id);
 
-        const roomInfo = RoomManager.getRoomBySocketId(socket.id);
-        if (!roomInfo) return;
+        const result = RoomManager.disconnectSocket(socket.id);
+        if (!result) return;
 
-        const { roomCode, playerId, room } = roomInfo;
+        const { roomCode, room, playerId, newHost, disconnected } = result;
 
-        const player = room.players.get(playerId);
-
-        if (room.state === 'playing' && room.gameState) {
-          const wasHost = player && player.isHost;
-
-          if (player) {
-            player.isConnected = false;
-          }
-
-          GameEngine.handleDisconnect(io, room, playerId);
-
-          const result = RoomManager.leaveRoom(roomCode, playerId);
-
-          if (wasHost && !result.roomDeleted) {
-            let newHostId = null;
-            for (const [id, p] of room.players) {
-              if (p.isConnected) {
-                newHostId = id;
-                break;
-              }
-            }
-            if (!newHostId && room.players.size > 0) {
-              const [firstId] = room.players.keys();
-              newHostId = firstId;
-            }
-            if (newHostId) {
-              for (const [, p] of room.players) {
-                p.isHost = false;
-              }
-              const h = room.players.get(newHostId);
-              if (h) h.isHost = true;
-              room.host = newHostId;
-              io.to(roomCode).emit('host-changed', { newHostId });
-            }
-          }
-
-          socket.to(roomCode).emit('player-disconnected', {
+        if (disconnected || !room.gameState) {
+          socket.to(roomCode).emit('player-left', {
             playerId,
+            newHost: newHost || null,
           });
 
-          if (!result.roomDeleted) {
-            io.to(roomCode).emit('room-updated', {
-              room: RoomManager.getSanitizedRoom(roomCode),
-            });
-          }
-        } else if (room.gameState && room.gameState.phase === 'game-over') {
-          GameEngine.handleDisconnect(io, room, playerId);
+          io.to(roomCode).emit('room-updated', {
+            room: RoomManager.getSanitizedRoom(roomCode),
+          });
+          return;
+        }
 
-          const wasHost = player && player.isHost;
-          const result = RoomManager.leaveRoom(roomCode, playerId);
+        GameEngine.handleDisconnect(io, room, playerId);
 
-          if (wasHost && !result.roomDeleted) {
-            let newHostId = null;
-            for (const [id, p] of room.players) {
-              if (p.isConnected) {
-                newHostId = id;
-                break;
-              }
-            }
-            if (!newHostId && room.players.size > 0) {
-              const [firstId] = room.players.keys();
-              newHostId = firstId;
-            }
-            if (newHostId) {
-              for (const [, p] of room.players) {
-                p.isHost = false;
-              }
-              const h = room.players.get(newHostId);
-              if (h) h.isHost = true;
-              room.host = newHostId;
-              io.to(roomCode).emit('host-changed', { newHostId });
+        const wasHost = playerId === room.host;
+        if (wasHost) {
+          let newHostId = null;
+          for (const [id, p] of room.players) {
+            if (p.isConnected) {
+              newHostId = id;
+              break;
             }
           }
-
-          if (!result.roomDeleted) {
-            socket.to(roomCode).emit('player-left', {
-              playerId,
-              newHost: result.newHost || null,
-            });
-
-            io.to(roomCode).emit('room-updated', {
-              room: RoomManager.getSanitizedRoom(roomCode),
-            });
+          if (!newHostId && room.players.size > 0) {
+            const [firstId] = room.players.keys();
+            newHostId = firstId;
           }
-        } else {
-          const result = RoomManager.leaveRoom(roomCode, playerId);
-
-          if (!result.roomDeleted) {
-            socket.to(roomCode).emit('player-left', {
-              playerId,
-              newHost: result.newHost || null,
-            });
-
-            io.to(roomCode).emit('room-updated', {
-              room: RoomManager.getSanitizedRoom(roomCode),
-            });
+          if (newHostId) {
+            for (const [, p] of room.players) {
+              p.isHost = false;
+            }
+            const h = room.players.get(newHostId);
+            if (h) h.isHost = true;
+            room.host = newHostId;
+            io.to(roomCode).emit('host-changed', { newHostId });
           }
         }
+
+        socket.to(roomCode).emit('player-disconnected', { playerId });
+
+        io.to(roomCode).emit('room-updated', {
+          room: RoomManager.getSanitizedRoom(roomCode),
+        });
       } catch (err) {
         console.error('[disconnect]', err);
       }

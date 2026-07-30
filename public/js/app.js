@@ -3,6 +3,8 @@
    ═══════════════════════════════════════════════════════════ */
 
 (() => {
+  const RECONNECT_KEY = 'drawmafia_reconnect';
+
   const state = {
     socket: null,
     myId: null,
@@ -15,6 +17,7 @@
     players: [],
     myRole: null,
     myWord: null,
+    myWordLength: 0,
     currentPhase: null,
     currentTurnId: null,
     votes: {},
@@ -23,6 +26,7 @@
     timerStart: 0,
     timerDuration: 0,
     codeRevealed: true,
+    reconnectToken: null,
   };
 
   const $ = (s) => document.querySelector(s);
@@ -34,6 +38,12 @@
     state.socket.on('connect', () => {
       console.log('Connected:', state.socket.id);
       UI.toast('Connected', 'success');
+      try {
+        const stored = JSON.parse(localStorage.getItem(RECONNECT_KEY));
+        if (stored && stored.token && !state.roomCode) {
+          state.socket.emit('reconnect-game', { reconnectToken: stored.token });
+        }
+      } catch {}
     });
 
     state.socket.on('disconnect', () => {
@@ -42,30 +52,49 @@
 
     state.socket.on('reconnect', () => {
       UI.toast('Reconnected!', 'success');
-      if (state.roomCode) {
-        if (state.roomState === 'playing' || state.roomState === 'lobby') {
-          state.socket.emit('join-room', { roomCode: state.roomCode, playerName: state.myName });
-        }
+      if (state.reconnectToken && state.roomCode) {
+        state.socket.emit('reconnect-game', { reconnectToken: state.reconnectToken });
+      } else {
+        try {
+          const stored = JSON.parse(localStorage.getItem(RECONNECT_KEY));
+          if (stored && stored.token) {
+            state.socket.emit('reconnect-game', { reconnectToken: stored.token });
+          }
+        } catch {}
       }
     });
 
-    state.socket.on('error', (data) => UI.toast(data.message || 'Error', 'error'));
+    state.socket.on('error', (data) => {
+      UI.toast(data.message || 'Error', 'error');
+      const createBtn = $('#btn-create');
+      const joinBtn = $('#btn-join');
+      if (createBtn) { createBtn.disabled = false; createBtn.textContent = 'Create Room'; }
+      if (joinBtn) { joinBtn.disabled = false; joinBtn.textContent = 'Join'; }
+    });
 
     // ── Room events ──
     state.socket.on('room-created', (data) => {
+      const createBtn = $('#btn-create');
+      if (createBtn) { createBtn.disabled = false; createBtn.textContent = 'Create Room'; }
       state.roomCode = data.roomCode;
       state.myId = data.playerId;
       state.isHost = true;
       state.codeRevealed = false;
+      state.reconnectToken = data.reconnectToken;
+      try { localStorage.setItem(RECONNECT_KEY, JSON.stringify({ token: data.reconnectToken, roomCode: data.roomCode })); } catch {}
       applyRoomState(data.room);
       showScreen('lobby');
       updateLobbyCodeDisplay();
     });
 
     state.socket.on('room-joined', (data) => {
+      const joinBtn = $('#btn-join');
+      if (joinBtn) { joinBtn.disabled = false; joinBtn.textContent = 'Join'; }
       state.roomCode = data.roomCode;
       state.myId = data.playerId;
       state.codeRevealed = false;
+      state.reconnectToken = data.reconnectToken;
+      try { localStorage.setItem(RECONNECT_KEY, JSON.stringify({ token: data.reconnectToken, roomCode: data.roomCode })); } catch {}
       applyRoomState(data.room);
       showScreen('lobby');
       updateLobbyCodeDisplay();
@@ -120,6 +149,7 @@
     state.socket.on('role-assigned', (data) => {
       state.myRole = data.role;
       state.myWord = data.word;
+      state.myWordLength = data.wordLength || 0;
     });
 
     state.socket.on('round-started', (data) => {
@@ -136,6 +166,8 @@
         case 'drawing':
           showScreen('game');
           hideAllBottomBars();
+          const eo = $('#ejected-overlay');
+          if (eo) eo.style.display = 'none';
           if (!data.persistDrawings) {
             DrawCanvas.clearCanvas();
           }
@@ -221,6 +253,7 @@
     state.socket.on('draw-start', (data) => DrawCanvas.handleDrawStart(data));
     state.socket.on('draw-points', (data) => DrawCanvas.handleDrawPoints(data));
     state.socket.on('draw-end', (data) => DrawCanvas.handleDrawEnd(data));
+    state.socket.on('stroke-undone', (data) => DrawCanvas.handleStrokeUndone(data));
 
     state.socket.on('canvas-strokes', (strokes) => {
       if (strokes && Array.isArray(strokes)) {
@@ -230,7 +263,7 @@
 
     state.socket.on('chat-message', (data) => {
       AudioEngine.playMessage();
-      ['chat-lobby', 'chat-game'].forEach((id) => {
+      ['chat-lobby', 'chat-game', 'chat-game-mobile'].forEach((id) => {
         const el = document.getElementById(id);
         if (el) {
           UI.renderChat(el, data);
@@ -251,14 +284,25 @@
       updateInlineVoteCount();
     });
 
+    state.socket.on('ejected', (data) => {
+      const overlay = $('#ejected-overlay');
+      const msg = $('#ejected-msg');
+      if (overlay) overlay.style.display = '';
+      if (msg) msg.textContent = data.reason || 'You were voted out.';
+      DrawCanvas.disableDrawing();
+      hideAllBottomBars();
+    });
+
     state.socket.on('round-results', (data) => showResults(data));
 
     state.socket.on('snipe-result', (data) => {
+      const snipeBtn = $('#btn-snipe');
+      if (snipeBtn) snipeBtn.style.display = 'none';
       if (data.correct) {
-        UI.toast(data.playerName + ' sniped the word!', 'success');
+        UI.toast('The imposter sniped the word!', 'success');
         AudioEngine.playWinFanfare();
       } else {
-        UI.toast(data.playerName + ' missed the snipe!', 'error');
+        UI.toast('The imposter missed the snipe!', 'error');
         AudioEngine.playLoseBuzzer();
       }
     });
@@ -273,6 +317,9 @@
       state.currentTurnId = null;
       state.votes = {};
       state.selectedVote = null;
+      const eo = $('#ejected-overlay');
+      if (eo) eo.style.display = 'none';
+      if (playAgainTimerInterval) { clearInterval(playAgainTimerInterval); playAgainTimerInterval = null; }
       DrawCanvas.clearCanvas();
       clearUITimer();
       if (data && data.room) applyRoomState(data.room);
@@ -282,18 +329,52 @@
       updateStartButton();
     });
 
+    state.socket.on('player-reconnected', (data) => {
+      if (data.room) applyRoomState(data.room);
+      UI.toast('A player reconnected', 'info');
+    });
+
+    state.socket.on('reconnected', (data) => {
+      state.myId = data.playerId;
+      state.roomCode = data.roomCode;
+      state.reconnectToken = data.reconnectToken;
+      applyRoomState(data.room);
+
+      if (data.gameState) {
+        state.roomState = 'playing';
+        state.currentPhase = data.gameState.phase;
+        if (data.gameState.phase === 'role-reveal') {
+          showScreen('role-reveal');
+        } else {
+          showScreen('game');
+          setupGameScreen();
+        }
+      } else {
+        showScreen('lobby');
+      }
+
+      UI.toast('Reconnected successfully', 'success');
+    });
+
     state.socket.on('removed-from-room', (data) => {
+      if (playAgainTimerInterval) { clearInterval(playAgainTimerInterval); playAgainTimerInterval = null; }
       UI.toast(data.reason || 'You were removed from the room', 'error');
       resetState();
       showScreen('home');
     });
 
     state.socket.on('play-again-updated', (data) => {
-      updatePlayAgainStatus(data.playAgainPlayers || []);
+      updatePlayAgainStatus(data.playAgainPlayers || [], data.timerDeadline);
+      startPlayAgainTimer(data.playAgainPlayers || [], data.timerDeadline);
     });
 
-    state.socket.on('player-disconnected', () => {
-      UI.toast('A player disconnected', 'info');
+    state.socket.on('player-disconnected', (data) => {
+      if (data && data.playerId) {
+        const p = state.players.find((pl) => pl.id === data.playerId);
+        UI.toast((p ? p.name : 'A player') + ' disconnected', 'info');
+      } else {
+        UI.toast('A player disconnected', 'info');
+      }
     });
   }
 
@@ -305,6 +386,17 @@
     updateLobbyPlayers();
     renderLobbySettings();
     updateStartButton();
+    const readyBtn = $('#btn-ready');
+    if (readyBtn) {
+      if (state.isHost) {
+        readyBtn.style.display = 'none';
+      } else {
+        readyBtn.style.display = '';
+        const me = state.players.find((p) => p.id === state.myId);
+        readyBtn.textContent = me && me.ready ? '✓ Ready' : 'Ready';
+        readyBtn.className = 'btn ' + (me && me.ready ? 'btn-primary' : 'btn-secondary');
+      }
+    }
   }
 
   function updateLobbyCodeDisplay() {
@@ -339,11 +431,21 @@
     if (!btn) return;
     const imposterCount = (state.settings && state.settings.imposterCount) || 1;
     const minPlayers = imposterCount + 2;
+    const nonHostPlayers = state.players.filter((p) => !p.isHost && p.isConnected !== false);
+    const readyCount = nonHostPlayers.filter((p) => p.ready).length;
+    const allReady = nonHostPlayers.length > 0 && readyCount === nonHostPlayers.length;
+
     const canStart = state.isHost && state.players.length >= minPlayers;
-    btn.disabled = !canStart;
-    if (canStart) btn.textContent = 'Start Game';
-    else if (state.isHost) btn.textContent = `Start Game (${state.players.length}/${minPlayers} min)`;
-    else btn.textContent = 'Waiting for host...';
+    btn.disabled = !canStart || (nonHostPlayers.length > 0 && !allReady);
+    if (canStart && nonHostPlayers.length > 0) {
+      btn.textContent = 'Start Game (' + readyCount + '/' + nonHostPlayers.length + ' ready)';
+    } else if (canStart) {
+      btn.textContent = 'Start Game';
+    } else if (state.isHost) {
+      btn.textContent = 'Start Game (' + state.players.length + '/' + minPlayers + ' min)';
+    } else {
+      btn.textContent = 'Waiting for host...';
+    }
   }
 
   function renderLobbySettings() {
@@ -384,6 +486,14 @@
       word.innerHTML = 'The word is: <strong>' + UI.escapeHtml(state.myWord || '???') + '</strong>';
     }
 
+    const catEl = $('#reveal-category');
+    if (catEl && data.category && data.category !== 'all') {
+      catEl.textContent = 'Category: ' + data.category;
+      catEl.style.display = '';
+    } else if (catEl) {
+      catEl.style.display = 'none';
+    }
+
     $('#reveal-round').textContent = data.round;
     $('#reveal-total').textContent = data.totalRounds;
     showScreen('role-reveal');
@@ -396,7 +506,9 @@
     const wordBar = $('#g-word-bar');
     if (wordBar) wordBar.style.display = '';
     if (state.myRole === 'imposter' && state.settings.mode === 'classic') {
-      wordBar.textContent = '???';
+      const len = state.myWordLength || 0;
+      const underscores = Array(len).fill('_').join(' ');
+      wordBar.innerHTML = underscores + ' <sup class="word-length">(' + len + ')</sup>';
     } else {
       wordBar.textContent = state.myWord || '';
     }
@@ -407,28 +519,31 @@
     const banner = $('#turn-banner');
     const bannerText = $('#turn-banner-text');
 
+    const player = state.players.find((p) => p.id === data.playerId);
+    const playerName = player ? player.name : '???';
+
+    banner.style.display = '';
     if (data.playerId === state.myId) {
-      banner.style.display = '';
-      bannerText.textContent = 'Your Turn!';
+      bannerText.textContent = 'Your Turn — you are drawing!';
       DrawCanvas.enableDrawing();
       $('#draw-tools').style.display = '';
       AudioEngine.playDing();
     } else {
-      banner.style.display = 'none';
       DrawCanvas.disableDrawing();
       if (state.currentPhase === 'drawing') $('#draw-tools').style.display = 'none';
-      const player = state.players.find((p) => p.id === data.playerId);
-      bannerText.textContent = (player ? player.name : '???') + '\'s turn';
+      bannerText.textContent = playerName + ' is drawing now';
     }
   }
 
   function updateGamePlayerList() {
-    const container = document.getElementById('g-players');
-    if (!container) return;
-    UI.renderPlayerList(container, state.players, {
-      currentTurnId: state.currentTurnId,
-      myId: state.myId,
-      isHost: false,
+    ['g-players', 'g-players-mobile'].forEach((id) => {
+      const container = document.getElementById(id);
+      if (!container) return;
+      UI.renderPlayerList(container, state.players, {
+        currentTurnId: state.currentTurnId,
+        myId: state.myId,
+        isHost: false,
+      });
     });
   }
 
@@ -461,12 +576,14 @@
     $('#btn-confirm-vote-inline').onclick = () => {
       if (state.selectedVote) {
         state.socket.emit('cast-vote', { targetId: state.selectedVote });
+        UI.toast('Vote cast! Waiting for others...', 'info');
         disableInlineVoteUI();
       }
     };
 
     $('#btn-skip-vote-inline').onclick = () => {
       state.socket.emit('cast-vote', { targetId: 'skip' });
+      UI.toast('Vote cast! Waiting for others...', 'info');
       disableInlineVoteUI();
     };
 
@@ -516,7 +633,7 @@
   function updateInlineVoteCount() {
     const el = $('#vote-count-inline');
     if (!el) return;
-    const total = state.players.filter((p) => p.isConnected !== false).length;
+    const total = state.players.filter((p) => p.isConnected === true).length;
     const voted = Object.keys(state.votes).length;
     el.textContent = voted + ' / ' + total + ' voted';
   }
@@ -605,6 +722,12 @@
     } else if (wrongVote) {
       title.textContent = 'Wrong Person Voted Out!';
       title.className = 'res-title lose';
+    } else if (data.result === 'caught' && data.wordGuessed === false) {
+      title.textContent = 'Imposter Failed to Guess!';
+      title.className = 'res-title win';
+    } else if (data.result === 'word-guessed') {
+      title.textContent = 'Imposter Guessed the Word!';
+      title.className = 'res-title lose';
     } else {
       title.textContent = artistsWin ? 'Artists Win!' : 'Imposter Wins!';
       title.className = 'res-title ' + (artistsWin ? 'win' : 'lose');
@@ -656,6 +779,32 @@
       });
     }
 
+    // ── Vote breakdown ──
+    const resVotesEl = $('#res-votes');
+    const votesList = $('#res-votes-list');
+    if (resVotesEl && votesList && data.votes && Object.keys(data.votes).length > 0) {
+      votesList.innerHTML = '';
+      Object.keys(data.votes).forEach((voterId) => {
+        const targetId = data.votes[voterId];
+        const voter = state.players.find((p) => p.id === voterId);
+        const target = state.players.find((p) => p.id === targetId);
+        const row = UI.el('div', 'res-vote-row');
+        const voterSpan = UI.el('span', 'voter', voter ? voter.name : voterId);
+        let targetSpan;
+        if (targetId === '__skip__') {
+          targetSpan = UI.el('span', 'target skip', 'Skipped');
+        } else {
+          targetSpan = UI.el('span', 'target', target ? target.name : targetId);
+        }
+        row.appendChild(voterSpan);
+        row.appendChild(targetSpan);
+        votesList.appendChild(row);
+      });
+      resVotesEl.style.display = '';
+    } else if (resVotesEl) {
+      resVotesEl.style.display = 'none';
+    }
+
     const scoreContainer = $('#res-scores');
     scoreContainer.innerHTML = '';
     if (data.gameOver && data.roundScores) {
@@ -671,7 +820,8 @@
       });
     }
 
-    let remaining = 5;
+    const transitionDelay = data.transitionDelay || 5;
+    let remaining = transitionDelay;
     const countEl = $('#res-next-count');
     const resNextEl = $('#res-next');
     if (resNextEl) {
@@ -722,12 +872,41 @@
     AudioEngine.playWinFanfare();
   }
 
-  function updatePlayAgainStatus(playAgainPlayers) {
+  let playAgainTimerInterval = null;
+
+  function updatePlayAgainStatus(playAgainPlayers, timerDeadline) {
     const statusEl = $('#play-again-status');
     if (!statusEl) return;
     const clicked = playAgainPlayers.length;
     const iClicked = playAgainPlayers.includes(state.myId);
-    statusEl.textContent = clicked + ' / ' + state.players.length + ' ready' + (iClicked ? ' (you)' : '');
+    let text = clicked + ' / ' + state.players.length + ' ready' + (iClicked ? ' (you)' : '');
+    if (timerDeadline) {
+      const remaining = Math.max(0, Math.ceil((timerDeadline - Date.now()) / 1000));
+      if (remaining > 0) text += ' — auto-start in ' + remaining + 's';
+      else text += ' — starting...';
+    }
+    statusEl.textContent = text;
+  }
+
+  function startPlayAgainTimer(playAgainPlayers, timerDeadline) {
+    if (playAgainTimerInterval) clearInterval(playAgainTimerInterval);
+    if (!timerDeadline) return;
+    playAgainTimerInterval = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((timerDeadline - Date.now()) / 1000));
+      const statusEl = $('#play-again-status');
+      if (statusEl) {
+        const clicked = (playAgainPlayers || []).length;
+        const iClicked = playAgainPlayers && playAgainPlayers.includes(state.myId);
+        let text = clicked + ' / ' + state.players.length + ' ready' + (iClicked ? ' (you)' : '');
+        if (remaining > 0) text += ' — auto-start in ' + remaining + 's';
+        else text += ' — starting...';
+        statusEl.textContent = text;
+      }
+      if (remaining <= 0 && playAgainTimerInterval) {
+        clearInterval(playAgainTimerInterval);
+        playAgainTimerInterval = null;
+      }
+    }, 1000);
   }
 
   // ── Timer ─────────────────────────────────────────────────
@@ -773,11 +952,15 @@
     state.settings = {};
     state.myRole = null;
     state.myWord = null;
+    state.myWordLength = 0;
     state.currentPhase = null;
     state.currentTurnId = null;
     state.votes = {};
     state.selectedVote = null;
     state.roomState = 'lobby';
+    state.reconnectToken = null;
+    state.codeRevealed = true;
+    try { localStorage.removeItem(RECONNECT_KEY); } catch {}
     clearUITimer();
   }
 
@@ -788,19 +971,25 @@
       const name = $('#input-name').value.trim();
       if (!name) { UI.toast('Enter your name', 'error'); return; }
       state.myName = name;
-      localStorage.setItem('dm-name', name);
+      localStorage.setItem('drawmafia_name', name);
       AudioEngine.init();
+      const btn = $('#btn-create');
+      btn.disabled = true;
+      btn.textContent = 'Creating...';
       state.socket.emit('create-room', { playerName: name });
     };
 
     $('#btn-join').onclick = () => {
       const name = $('#input-name').value.trim();
-      const code = $('#input-code').value.trim().toUpperCase();
+      const code = $('#input-code').value.trim();
       if (!name) { UI.toast('Enter your name', 'error'); return; }
       if (!code) { UI.toast('Enter room code', 'error'); return; }
       state.myName = name;
-      localStorage.setItem('dm-name', name);
+      localStorage.setItem('drawmafia_name', name);
       AudioEngine.init();
+      const btn = $('#btn-join');
+      btn.disabled = true;
+      btn.textContent = 'Joining...';
       state.socket.emit('join-room', { roomCode: code, playerName: name });
     };
 
@@ -827,7 +1016,14 @@
       state.socket.emit('start-game');
     };
 
+    $('#btn-ready').onclick = () => {
+      state.socket.emit('toggle-ready');
+    };
+
     $('#btn-leave').onclick = () => {
+      if (state.players.length > 1) {
+        if (!confirm('Are you sure you want to leave the room?')) return;
+      }
       state.socket.emit('leave-room');
       resetState();
       showScreen('home');
@@ -843,17 +1039,47 @@
     $('#chat-in-lobby').onkeydown = (e) => { if (e.key === 'Enter') chatLobby(); };
 
     // Chat (game)
-    const chatGame = () => {
+    const chatGameFn = () => {
       const input = $('#chat-in-game');
       const msg = input.value.trim();
       if (msg) { state.socket.emit('chat-message', { message: msg }); input.value = ''; }
     };
-    $('#btn-chat-game').onclick = chatGame;
-    $('#chat-in-game').onkeydown = (e) => { if (e.key === 'Enter') chatGame(); };
+    $('#btn-chat-game').onclick = chatGameFn;
+    $('#chat-in-game').onkeydown = (e) => { if (e.key === 'Enter') chatGameFn(); };
+
+    // Mobile chat (game)
+    const chatGameMobile = () => {
+      const input = $('#chat-in-game-mobile');
+      const msg = input.value.trim();
+      if (msg) { state.socket.emit('chat-message', { message: msg }); input.value = ''; }
+    };
+    $('#btn-chat-game-mobile').onclick = chatGameMobile;
+    $('#chat-in-game-mobile').onkeydown = (e) => { if (e.key === 'Enter') chatGameMobile(); };
+
+    // Mobile overlay toggles
+    $('#btn-mobile-players').onclick = () => {
+      const overlay = $('#mobile-players-overlay');
+      if (overlay) overlay.style.display = overlay.style.display === 'none' ? '' : 'none';
+    };
+    $('#btn-close-mobile-players').onclick = () => {
+      const overlay = $('#mobile-players-overlay');
+      if (overlay) overlay.style.display = 'none';
+    };
+    $('#btn-mobile-chat').onclick = () => {
+      const overlay = $('#mobile-chat-overlay');
+      if (overlay) overlay.style.display = overlay.style.display === 'none' ? '' : 'none';
+    };
+    $('#btn-close-mobile-chat').onclick = () => {
+      const overlay = $('#mobile-chat-overlay');
+      if (overlay) overlay.style.display = 'none';
+    };
 
     // Drawing tools
     $('#btn-eraser').onclick = () => DrawCanvas.setTool('eraser');
-    $('#btn-undo').onclick = () => DrawCanvas.undoLastStroke();
+    $('#btn-undo').onclick = () => {
+      DrawCanvas.undoLastStroke();
+      state.socket.emit('undo-stroke');
+    };
     $('#btn-done').onclick = () => state.socket.emit('done-drawing');
 
     $('#pick-color').oninput = (e) => {
@@ -879,13 +1105,23 @@
       AudioEngine.init();
       const muted = AudioEngine.toggleMute();
       $('#btn-mute').textContent = muted ? '🔇' : '🔊';
-      localStorage.setItem('dm-muted', muted);
+      localStorage.setItem('drawmafia_muted', muted);
     };
 
-    if (localStorage.getItem('dm-muted') === 'true') {
+    if (localStorage.getItem('drawmafia_muted') === 'true') {
       AudioEngine.toggleMute();
       $('#btn-mute').textContent = '🔇';
     }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === '/' && state.currentScreen === 'game') {
+        const input = $('#chat-in-game');
+        if (input && document.activeElement !== input) {
+          e.preventDefault();
+          input.focus();
+        }
+      }
+    });
 
     window.addEventListener('beforeunload', (e) => {
       if (state.roomState === 'playing') { e.preventDefault(); e.returnValue = ''; }
@@ -895,13 +1131,10 @@
   // ── Init ──────────────────────────────────────────────────
   function init() {
     UI.initParticles();
-    DrawCanvas.init(
-      document.getElementById('draw-canvas'),
-      document.getElementById('disc-canvas')
-    );
+    DrawCanvas.init(document.getElementById('draw-canvas'));
     connectSocket();
     wireUI();
-    const savedName = localStorage.getItem('dm-name');
+    const savedName = localStorage.getItem('drawmafia_name');
     if (savedName) $('#input-name').value = savedName;
     showScreen('home');
   }

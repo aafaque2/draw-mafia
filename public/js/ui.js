@@ -33,7 +33,11 @@ const UI = (() => {
     const { currentTurnId, myId, isHost, onKick } = opts || {};
 
     players.forEach((p) => {
-      const item = el('div', 'player-item' + (p.isConnected === false ? ' disconnected' : '') + (p.id === currentTurnId ? ' active-turn' : ''));
+      const classNames = ['player-item'];
+      if (p.isConnected === false) classNames.push('disconnected');
+      if (p.id === currentTurnId) classNames.push('active-turn');
+      if (p.ready) classNames.push('ready');
+      const item = el('div', classNames.join(' '));
       const avatar = el('div', 'player-avatar', (p.name || '?')[0].toUpperCase());
       avatar.style.background = getPlayerColor(p.id);
 
@@ -48,6 +52,9 @@ const UI = (() => {
       }
       if (p.isConnected === false) {
         tags.appendChild(el('span', 'player-tag tag-disconnected', 'DC'));
+      }
+      if (p.ready && !p.isHost) {
+        tags.appendChild(el('span', 'player-tag tag-ready', 'Ready'));
       }
 
       item.appendChild(avatar);
@@ -74,8 +81,9 @@ const UI = (() => {
       msgEl.appendChild(nameSpan);
       msgEl.appendChild(document.createTextNode(' ' + escapeHtml(message.message)));
     }
+    const nearBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 40;
     container.appendChild(msgEl);
-    container.scrollTop = container.scrollHeight;
+    if (nearBottom) container.scrollTop = container.scrollHeight;
   }
 
   function renderSettings(container, settings, isHost, onchange) {
@@ -165,21 +173,7 @@ const UI = (() => {
     });
   }
 
-  function renderResults(container, data) {
-    container.innerHTML = '';
-    const { roundScores, scores } = data;
-    if (!roundScores) return;
 
-    Object.keys(roundScores).forEach((id) => {
-      const row = el('div', 'res-score-row');
-      const name = el('span', 'rs-name', escapeHtml(id));
-      const change = el('span', 'rs-change ' + (roundScores[id] >= 0 ? 'pos' : 'neg'),
-        (roundScores[id] >= 0 ? '+' : '') + roundScores[id]);
-      row.appendChild(name);
-      row.appendChild(change);
-      container.appendChild(row);
-    });
-  }
 
   function renderScoreboard(container, finalScores) {
     container.innerHTML = '';
@@ -263,7 +257,7 @@ const UI = (() => {
     renderPlayerList,
     renderChat,
     renderSettings,
-    renderResults,
+
     renderScoreboard,
     renderLeaderboard,
     updateTimer,

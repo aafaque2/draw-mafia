@@ -1,8 +1,10 @@
+const { LIMITS, SETTINGS_RANGES, VALID_MODES, VALID_VISIBILITY, VALID_CATEGORIES, TIMING } = require('./constants');
 const crypto = require('crypto');
+
 const rooms = new Map();
 const socketToRoom = new Map();
+const tokenToPlayer = new Map();
 const persistentScores = new Map();
-const MAX_PERSISTENT_SCORES = 5000;
 
 const DEFAULT_SETTINGS = {
   mode: 'classic',
@@ -18,27 +20,26 @@ const DEFAULT_SETTINGS = {
   persistDrawings: false,
 };
 
-const SETTINGS_RANGES = {
-  maxPlayers: { min: 3, max: 12 },
-  drawTime: { min: 5, max: 30 },
-  drawingPasses: { min: 1, max: 3 },
-  discussionTime: { min: 10, max: 180 },
-  votingTime: { min: 15, max: 90 },
-  totalRounds: { min: 1, max: 10 },
-  imposterCount: { min: 1, max: 2 },
-};
-
 function generateRoomCode() {
   let code;
   do {
-    code = crypto.randomBytes(3).toString('hex').toUpperCase();
+    code = String(Math.floor(100000 + Math.random() * 900000));
   } while (rooms.has(code));
   return code;
 }
 
+function generatePlayerId() {
+  return 'p_' + Math.random().toString(36).slice(2, 10);
+}
+
+function generateToken() {
+  return crypto.randomBytes(16).toString('hex');
+}
+
 function createRoom(socketId, playerName) {
   const roomCode = generateRoomCode();
-  const playerId = socketId;
+  const playerId = generatePlayerId();
+  const reconnectToken = generateToken();
 
   const room = {
     code: roomCode,
@@ -48,6 +49,7 @@ function createRoom(socketId, playerName) {
     state: 'lobby',
     currentRound: 0,
     gameState: null,
+    ready: new Set(),
   };
 
   room.players.set(playerId, {
@@ -57,12 +59,14 @@ function createRoom(socketId, playerName) {
     isConnected: true,
     isHost: true,
     score: getPersistentScore(playerName),
+    reconnectToken,
   });
 
   rooms.set(roomCode, room);
   socketToRoom.set(socketId, { roomCode, playerId });
+  tokenToPlayer.set(reconnectToken, { roomCode, playerId });
 
-  return { roomCode, playerId, room };
+  return { roomCode, playerId, reconnectToken, room };
 }
 
 function joinRoom(roomCode, socketId, playerName) {
@@ -77,7 +81,8 @@ function joinRoom(roomCode, socketId, playerName) {
     }
   }
 
-  const playerId = socketId;
+  const playerId = generatePlayerId();
+  const reconnectToken = generateToken();
 
   room.players.set(playerId, {
     id: playerId,
@@ -86,12 +91,84 @@ function joinRoom(roomCode, socketId, playerName) {
     isConnected: true,
     isHost: false,
     score: getPersistentScore(playerName),
+    reconnectToken,
   });
 
   socketToRoom.set(socketId, { roomCode, playerId });
+  tokenToPlayer.set(reconnectToken, { roomCode, playerId });
 
   const player = room.players.get(playerId);
-  return { playerId, player };
+  return { playerId, reconnectToken, player };
+}
+
+function reconnectPlayer(socketId, reconnectToken) {
+  const info = tokenToPlayer.get(reconnectToken);
+  if (!info) return { error: 'Invalid reconnect token' };
+
+  const room = rooms.get(info.roomCode);
+  if (!room) {
+    tokenToPlayer.delete(reconnectToken);
+    return { error: 'Room not found' };
+  }
+
+  const player = room.players.get(info.playerId);
+  if (!player) {
+    tokenToPlayer.delete(reconnectToken);
+    return { error: 'Player not found' };
+  }
+
+  const oldSocketId = player.socketId;
+  socketToRoom.delete(oldSocketId);
+
+  player.socketId = socketId;
+  player.isConnected = true;
+  socketToRoom.set(socketId, { roomCode: info.roomCode, playerId: info.playerId });
+
+  return { playerId: info.playerId, roomCode: info.roomCode, room, player };
+}
+
+function disconnectSocket(socketId) {
+  const info = socketToRoom.get(socketId);
+  if (!info) return null;
+
+  const room = rooms.get(info.roomCode);
+  if (!room) {
+    socketToRoom.delete(socketId);
+    return null;
+  }
+
+  const player = room.players.get(info.playerId);
+  if (!player) {
+    socketToRoom.delete(socketId);
+    return null;
+  }
+
+  player.isConnected = false;
+
+  if (room.state === 'lobby') {
+    socketToRoom.delete(socketId);
+    room.players.delete(info.playerId);
+    tokenToPlayer.delete(player.reconnectToken);
+    room.ready.delete(info.playerId);
+
+    if (room.players.size === 0) {
+      rooms.delete(info.roomCode);
+      return null;
+    }
+
+    let newHost = null;
+    if (room.host === info.playerId) {
+      const [newHostId] = room.players.keys();
+      room.host = newHostId;
+      const h = room.players.get(newHostId);
+      if (h) h.isHost = true;
+      newHost = newHostId;
+    }
+
+    return { roomCode: info.roomCode, newHost, room, disconnected: true };
+  }
+
+  return { roomCode: info.roomCode, room, playerId: info.playerId, disconnected: false };
 }
 
 function leaveRoom(roomCode, playerId) {
@@ -102,7 +179,9 @@ function leaveRoom(roomCode, playerId) {
   if (!player) return { roomDeleted: true };
 
   socketToRoom.delete(player.socketId);
+  tokenToPlayer.delete(player.reconnectToken);
   room.players.delete(playerId);
+  room.ready.delete(playerId);
 
   if (room.players.size === 0) {
     rooms.delete(roomCode);
@@ -140,14 +219,13 @@ function updateSettings(roomCode, playerId, newSettings) {
 
     switch (key) {
       case 'mode':
-        if (val !== 'classic' && val !== 'blind') continue;
+        if (!VALID_MODES.includes(val)) continue;
         break;
       case 'drawingVisibility':
-        if (val !== 'live' && val !== 'reveal') continue;
+        if (!VALID_VISIBILITY.includes(val)) continue;
         break;
       case 'wordCategory': {
-        const valid = ['all', 'animals', 'food', 'objects', 'places', 'actions'];
-        if (!valid.includes(val)) continue;
+        if (!VALID_CATEGORIES.includes(val)) continue;
         break;
       }
       case 'persistDrawings':
@@ -190,7 +268,9 @@ function kickPlayer(roomCode, hostId, targetId) {
 
   const targetSocketId = target.socketId;
   socketToRoom.delete(target.socketId);
+  tokenToPlayer.delete(target.reconnectToken);
   room.players.delete(targetId);
+  room.ready.delete(targetId);
 
   return { success: true, targetSocketId };
 }
@@ -209,7 +289,27 @@ function getRoomBySocketId(socketId) {
     return null;
   }
 
+  const player = room.players.get(info.playerId);
+  if (!player) {
+    socketToRoom.delete(socketId);
+    return null;
+  }
+
   return { roomCode: info.roomCode, playerId: info.playerId, room };
+}
+
+function toggleReady(roomCode, playerId) {
+  const room = rooms.get(roomCode);
+  if (!room || room.state !== 'lobby') return false;
+  if (!room.players.has(playerId)) return false;
+  if (room.players.get(playerId).isHost) return false;
+
+  if (room.ready.has(playerId)) {
+    room.ready.delete(playerId);
+  } else {
+    room.ready.add(playerId);
+  }
+  return true;
 }
 
 function getSanitizedRoom(roomCode) {
@@ -224,6 +324,7 @@ function getSanitizedRoom(roomCode) {
       isHost: p.isHost,
       score: p.score,
       isConnected: p.isConnected,
+      ready: room.ready.has(p.id),
     });
   });
 
@@ -242,6 +343,7 @@ function deleteRoom(roomCode) {
   if (room) {
     room.players.forEach((p) => {
       socketToRoom.delete(p.socketId);
+      tokenToPlayer.delete(p.reconnectToken);
     });
     rooms.delete(roomCode);
   }
@@ -256,7 +358,7 @@ function setPersistentScore(name, score) {
   if (!name) return;
   const key = name.toLowerCase();
   persistentScores.set(key, score);
-  if (persistentScores.size > MAX_PERSISTENT_SCORES) {
+  if (persistentScores.size > LIMITS.PERSISTENT_SCORES_MAX) {
     const oldest = persistentScores.keys().next().value;
     persistentScores.delete(oldest);
   }
@@ -277,17 +379,20 @@ setInterval(() => {
       rooms.delete(code);
     }
   });
-}, 60000);
+}, TIMING.ROOM_CLEANUP_INTERVAL);
 
 module.exports = {
   createRoom,
   joinRoom,
   leaveRoom,
+  disconnectSocket,
+  reconnectPlayer,
   updateSettings,
   kickPlayer,
   getRoom,
   getRoomBySocketId,
   getSanitizedRoom,
+  toggleReady,
   deleteRoom,
   getPersistentScore,
   setPersistentScore,
