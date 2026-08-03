@@ -159,7 +159,6 @@ const GameEngine = {
     const wordBankSession = WordBank.createSession();
 
     const category = (room.settings && room.settings.wordCategory) || 'all';
-    gs.category = category;
     let word = null;
     let imposterWord = null;
     const mode = (room.settings && room.settings.mode) || 'classic';
@@ -186,6 +185,7 @@ const GameEngine = {
       round: 0,
       totalRounds: (room.settings && room.settings.totalRounds) || 3,
       phase: null,
+      category,
       word,
       imposterWord,
       imposters,
