@@ -709,7 +709,7 @@ const GameEngine = {
       phase: 'word-guess',
       imposterId,
       imposterName: (imposter && imposter.name) || imposterId,
-      duration: 15,
+      duration: TIMING.WORD_GUESS_DURATION / 1000,
     });
 
     gs.timer = setTimeout(() => {

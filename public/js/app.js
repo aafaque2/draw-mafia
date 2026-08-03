@@ -23,6 +23,7 @@
     votes: {},
     selectedVote: null,
     uiTimerHandle: null,
+    snipeTimerHandle: null,
     timerStart: 0,
     timerDuration: 0,
     codeRevealed: true,
@@ -643,6 +644,10 @@
 
   // ── Snipe (Word Guess during voting) ────────────────────
   function removeSnipeOverlay() {
+    if (state.snipeTimerHandle) {
+      clearInterval(state.snipeTimerHandle);
+      state.snipeTimerHandle = null;
+    }
     document.querySelectorAll('.snipe-overlay').forEach((el) => el.remove());
   }
 
@@ -656,6 +661,14 @@
     const overlay = UI.el('div', 'snipe-overlay');
     const inner = UI.el('div', 'snipe-dialog glass');
     inner.innerHTML = '<img src="/logo/draw-mafia-logo-nobg.png" alt="Draw Mafia" class="screen-icon-logo"><h3>' + title + '</h3><p>' + subtitle + '</p>';
+
+    let timerWrap = null;
+    if (opts.duration) {
+      timerWrap = UI.el('div', 'guess-timer-wrap');
+      timerWrap.innerHTML = '<div class="guess-timer-bar"><div class="guess-timer-fill"></div></div><span class="guess-timer-text"></span><p class="guess-timer-status" style="display:none">Time\'s up!</p>';
+      inner.appendChild(timerWrap);
+    }
+
     const inputWrap = UI.el('div', 'snipe-input-wrap');
     const input = UI.el('input', 'input snipe-input');
     input.type = 'text';
@@ -673,20 +686,50 @@
 
     setTimeout(() => input.focus(), 100);
 
+    function closeDialog() {
+      if (state.snipeTimerHandle) {
+        clearInterval(state.snipeTimerHandle);
+        state.snipeTimerHandle = null;
+      }
+      overlay.remove();
+    }
+
     function submit() {
       const guess = input.value.trim();
       if (guess) {
         state.socket.emit(emitEvent, { guess });
-        overlay.remove();
-        submitBtn.disabled = true;
+        closeDialog();
         UI.toast(opts.successToast || 'Submitted!', 'info');
       }
     }
 
     submitBtn.onclick = submit;
     input.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
-    cancelBtn.onclick = () => overlay.remove();
-    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    cancelBtn.onclick = closeDialog;
+    overlay.onclick = (e) => { if (e.target === overlay) closeDialog(); };
+
+    if (opts.duration) {
+      const fillEl = timerWrap.querySelector('.guess-timer-fill');
+      const textEl = timerWrap.querySelector('.guess-timer-text');
+      const statusEl = timerWrap.querySelector('.guess-timer-status');
+      const total = opts.duration * 1000;
+      const start = Date.now();
+      const tick = () => {
+        const elapsed = Date.now() - start;
+        if (elapsed >= total) {
+          clearInterval(state.snipeTimerHandle);
+          state.snipeTimerHandle = null;
+          UI.updateTimer(fillEl, textEl, total, total);
+          input.disabled = true;
+          submitBtn.disabled = true;
+          if (statusEl) statusEl.style.display = '';
+          return;
+        }
+        UI.updateTimer(fillEl, textEl, elapsed, total);
+      };
+      tick();
+      state.snipeTimerHandle = setInterval(tick, 100);
+    }
   }
 
   function showWordGuessOverlay(data) {
@@ -700,8 +743,20 @@
         btnText: 'Guess',
         emitEvent: 'guess-word',
         successToast: 'Word guessed!',
+        duration: data.duration || 15,
       });
     } else {
+      hideAllBottomBars();
+      if (state.currentScreen !== 'game') {
+        showScreen('game');
+        requestAnimationFrame(() => {
+          DrawCanvas.resize();
+          DrawCanvas.copyToDiscussion();
+        });
+      }
+      const gPhase = $('#g-phase');
+      if (gPhase) gPhase.textContent = 'Word Guess';
+      startTimer('g', data.duration || 15);
       UI.toast('The imposter has been caught! They get to guess the word...', 'info');
     }
   }
@@ -713,6 +768,7 @@
 
   // ── Results ───────────────────────────────────────────────
   function showResults(data) {
+    removeSnipeOverlay();
     showScreen('results');
 
     const title = $('#res-title');
@@ -1035,6 +1091,7 @@
     state.codeRevealed = true;
     state.lastGameOutcome = null;
     if (state.announceTimer) { clearTimeout(state.announceTimer); state.announceTimer = null; }
+    if (state.snipeTimerHandle) { clearInterval(state.snipeTimerHandle); state.snipeTimerHandle = null; }
     try { localStorage.removeItem(RECONNECT_KEY); } catch {}
     clearUITimer();
   }
