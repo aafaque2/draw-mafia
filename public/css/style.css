@@ -1016,6 +1016,7 @@ body {
 }
 .res-details p { margin-bottom: 8px; }
 .res-details strong { color: var(--accent); }
+.res-snipe-note { color: var(--danger); font-weight: 600; margin-top: 8px; }
 .res-scores {
   display: flex;
   flex-direction: column;
@@ -1039,6 +1040,33 @@ body {
 .rs-change.pos { color: var(--primary); }
 .rs-change.neg { color: var(--danger); }
 .res-next { color: var(--muted); font-size: 14px; }
+
+/* ═══════════════════════════════════════════════════════════
+   GAME END ANNOUNCE SCREEN
+   ═══════════════════════════════════════════════════════════ */
+.announce-container {
+  text-align: center;
+  max-width: 600px;
+  width: 100%;
+  padding: 40px 20px;
+  margin: auto 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.announce-title {
+  font-size: 64px;
+  font-weight: 900;
+  margin-bottom: 16px;
+  animation: reveal-pop 0.4s ease;
+}
+.announce-title.win { color: var(--primary); text-shadow: 0 0 40px var(--primary-glow); }
+.announce-title.lose { color: var(--danger); text-shadow: 0 0 40px var(--danger-glow); }
+.announce-reason {
+  font-size: 20px;
+  color: var(--text2);
+  animation: reveal-pop 0.4s ease 0.2s both;
+}
 
 .res-votes { margin-bottom: 16px; text-align: left; max-width: 400px; margin-left: auto; margin-right: auto; }
 .res-votes-title { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; text-align: center; }
@@ -1273,6 +1301,9 @@ body {
   .res-title { font-size: 28px; margin-bottom: 14px; }
   .res-details { padding: 14px; font-size: 14px; }
   .res-score-row { padding: 6px 12px; font-size: 13px; }
+  .announce-container { padding: 24px 16px; }
+  .announce-title { font-size: 40px; margin-bottom: 12px; }
+  .announce-reason { font-size: 16px; }
 
   /* Game Over */
   .gameover-container { padding: 24px 16px; }

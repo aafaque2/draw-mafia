@@ -234,6 +234,7 @@ const GameEngine = {
     gs.currentPass = 1;
     gs.phase = 'role-reveal';
     gs.snipeUsed = false;
+    gs.snipeMissed = false;
 
     connected.forEach((playerId) => {
       const player = room.players.get(playerId);
@@ -765,8 +766,10 @@ const GameEngine = {
       GameEngine.endRound(io, room, {
         result: 'word-guessed',
         caughtImposters: [playerId],
+        viaSnipe: true,
       });
     } else {
+      gs.snipeMissed = true;
       io.to(room.code).emit('snipe-result', {
         correct: false,
       });
@@ -788,6 +791,15 @@ const GameEngine = {
       result.result === 'word-guessed' ||
       result.result === 'imposter-disconnected' ||
       gs.round >= gs.totalRounds;
+
+    let winner = null;
+    if (gameOver) {
+      if (result.result === 'caught' || result.result === 'imposter-disconnected') {
+        winner = 'artists';
+      } else {
+        winner = 'imposter';
+      }
+    }
 
     const resultLabel = {
       'caught': 'Artists caught the imposter!',
@@ -811,6 +823,9 @@ const GameEngine = {
       ejectedId: result.ejectedId || null,
       wordGuessed: result.wordGuessed === true,
       gameOver,
+      winner,
+      viaSnipe: result.viaSnipe === true,
+      snipeMissed: gs.snipeMissed === true,
       transitionDelay: TIMING.ROUND_TRANSITION / 1000,
     });
 

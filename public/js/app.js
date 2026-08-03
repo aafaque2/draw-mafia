@@ -27,6 +27,8 @@
     timerDuration: 0,
     codeRevealed: true,
     reconnectToken: null,
+    lastGameOutcome: null,
+    announceTimer: null,
   };
 
   const $ = (s) => document.querySelector(s);
@@ -307,7 +309,7 @@
       }
     });
 
-    state.socket.on('game-over', (data) => showGameOver(data));
+    state.socket.on('game-over', (data) => showAnnounce(data));
 
     state.socket.on('returned-to-lobby', (data) => {
       state.roomState = 'lobby';
@@ -320,6 +322,7 @@
       const eo = $('#ejected-overlay');
       if (eo) eo.style.display = 'none';
       if (playAgainTimerInterval) { clearInterval(playAgainTimerInterval); playAgainTimerInterval = null; }
+      if (state.announceTimer) { clearTimeout(state.announceTimer); state.announceTimer = null; }
       DrawCanvas.clearCanvas();
       clearUITimer();
       if (data && data.room) applyRoomState(data.room);
@@ -733,10 +736,27 @@
       title.className = 'res-title ' + (artistsWin ? 'win' : 'lose');
     }
 
-    if (survived) AudioEngine.playDing();
-    else if (wrongVote) AudioEngine.playLoseBuzzer();
-    else if (artistsWin) AudioEngine.playWinFanfare();
-    else AudioEngine.playLoseBuzzer();
+    if (!data.gameOver) {
+      if (survived) AudioEngine.playDing();
+      else if (wrongVote) AudioEngine.playLoseBuzzer();
+      else if (artistsWin) AudioEngine.playWinFanfare();
+      else AudioEngine.playLoseBuzzer();
+    }
+
+    if (data.gameOver) {
+      state.lastGameOutcome = {
+        winner: data.winner || null,
+        result: data.result,
+        viaSnipe: data.viaSnipe === true,
+      };
+    } else {
+      state.lastGameOutcome = null;
+    }
+
+    const resSnipeNote = $('#res-snipe-note');
+    if (resSnipeNote) {
+      resSnipeNote.style.display = data.snipeMissed ? '' : 'none';
+    }
 
     const imposterNames = (data.imposters || []).map((id) => {
       const p = state.players.find((pl) => pl.id === id);
@@ -843,8 +863,61 @@
     }, 1000);
   }
 
+  // ── Game End Announce ─────────────────────────────────────
+  function showAnnounce(data) {
+    if (state.announceTimer) {
+      clearTimeout(state.announceTimer);
+      state.announceTimer = null;
+    }
+
+    const outcome = state.lastGameOutcome;
+    if (!outcome || !outcome.winner) {
+      showGameOver(data, true);
+      return;
+    }
+
+    const artistsWon = outcome.winner === 'artists';
+    showScreen('announce');
+
+    const titleEl = $('#announce-title');
+    const reasonEl = $('#announce-reason');
+    titleEl.textContent = artistsWon ? 'Artists Won!' : 'Imposter Won!';
+    titleEl.className = 'announce-title ' + (artistsWon ? 'win' : 'lose');
+
+    let reason = 'The game is over!';
+    switch (outcome.result) {
+      case 'caught':
+        reason = 'Caught the imposter!';
+        break;
+      case 'word-guessed':
+        reason = outcome.viaSnipe
+          ? 'The imposter sniped the word!'
+          : 'The imposter guessed the word!';
+        break;
+      case 'wrong-vote':
+        reason = 'An artist was voted out!';
+        break;
+      case 'imposter-disconnected':
+        reason = 'The imposter disconnected!';
+        break;
+      case 'survived':
+        reason = 'The imposter survived all rounds!';
+        break;
+      default:
+        reason = 'The game is over!';
+    }
+    reasonEl.textContent = reason;
+
+    AudioEngine.playWinFanfare();
+
+    state.announceTimer = setTimeout(() => {
+      state.announceTimer = null;
+      showGameOver(data, true);
+    }, 4000);
+  }
+
   // ── Game Over ─────────────────────────────────────────────
-  function showGameOver(data) {
+  function showGameOver(data, skipAudio) {
     showScreen('gameover');
     UI.renderScoreboard($('#final-board'), data.finalScores || []);
 
@@ -869,7 +942,7 @@
     const playAgainStatus = $('#play-again-status');
     if (playAgainStatus) playAgainStatus.textContent = '';
 
-    AudioEngine.playWinFanfare();
+    if (!skipAudio) AudioEngine.playWinFanfare();
   }
 
   let playAgainTimerInterval = null;
@@ -960,6 +1033,8 @@
     state.roomState = 'lobby';
     state.reconnectToken = null;
     state.codeRevealed = true;
+    state.lastGameOutcome = null;
+    if (state.announceTimer) { clearTimeout(state.announceTimer); state.announceTimer = null; }
     try { localStorage.removeItem(RECONNECT_KEY); } catch {}
     clearUITimer();
   }
